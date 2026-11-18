@@ -162,7 +162,9 @@ function spawnCometAt(state, data, x, y, kind) {
   }
   const comet = { x, y, r, vx: dx / distance * speed, vy: dy / distance * speed, kind };
   state.comets.push(comet);
-  data.cometMeta.set(comet, { age: 0, entered: false });
+  // Storm coordinates can start farther outside the field than ordinary spawns.
+  const spawnMargin = Math.max(12, -x - r, x - data.width - r, -y - r, y - data.height - r);
+  data.cometMeta.set(comet, { age: 0, entered: false, spawnMargin });
 }
 
 function dropBonusOrbs(state, data, comet, count) {
@@ -551,6 +553,7 @@ function updatePlaying(state, data, input, dt) {
     const visible = isCometVisible(data, comet);
     meta.entered = meta.entered || visible;
     const exited = meta.entered && !visible;
+    const margin = meta.spawnMargin ?? 12;
     if (touches(player, oldPlayerX, oldPlayerY, comet, oldX, oldY)) {
       state.comets.splice(i--, 1);
       hitPlayer(state, data);
@@ -558,8 +561,8 @@ function updatePlaying(state, data, input, dt) {
     } else if (comet.kind === 'splitter' && (exited || meta.age + EPSILON >= COMET.splitterLifetime)) {
       state.comets.splice(i--, 1);
       splitComet(state, data, comet, fragments, exited || !visible);
-    } else if (exited || comet.x < -comet.r - 12 || comet.x > data.width + comet.r + 12
-      || comet.y < -comet.r - 12 || comet.y > data.height + comet.r + 12) {
+    } else if (exited || comet.x < -comet.r - margin || comet.x > data.width + comet.r + margin
+      || comet.y < -comet.r - margin || comet.y > data.height + comet.r + margin) {
       state.comets.splice(i--, 1);
       if (comet.kind === 'elite') dropBonusOrbs(state, data, comet, ELITE.dropOrbs);
     }
