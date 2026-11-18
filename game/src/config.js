@@ -16,6 +16,8 @@ export const PLAYER = {
   invulnerable: 1.5,
 };
 
+export const DASH = { cooldown: 2.0, duration: 0.18, speed: 950, invulnerable: 0.35 };
+
 export const ORB = {
   starRadius: 8,
   bonusRadius: 12,
@@ -45,6 +47,8 @@ export const COMET = {
   homingTurnRate: 0.65, // Radians per second; slow-time also slows steering.
 };
 
+export const ELITE = { r: 34, speedMultiplier: 0.55, dropOrbs: 2, spawnWeight: 0.12 };
+
 export const POWERUP = {
   r: 13,
   speed: 70,
@@ -57,7 +61,9 @@ export const POWERUP = {
   magnetPullSpeed: 380,
   slowDuration: 6,
   slowMultiplier: 0.4,
-  weights: { shield: 0.30, double: 0.26, magnet: 0.24, slow: 0.20 },
+  lifeMax: 3,
+  bombPoints: 10,
+  weights: { shield: 0.28, double: 0.24, magnet: 0.22, slow: 0.12, life: 0.06, bomb: 0.08 },
 };
 
 export const DELIVERY = {
@@ -77,6 +83,8 @@ export const COMBO = {
   window: COMBO_SECONDS,
   max: 8,
 };
+
+export const COMBO_MILESTONES = { 5: 50, 10: 150 };
 
 export const LEVEL = {
   seconds: 15,
@@ -99,6 +107,8 @@ export const PALETTE = {
   shipCore: '#72efdd',
   trailCyan: '#00f5ff',
   trailMagenta: '#ff2a85',
+  dash: '#72efdd',
+  dashGlow: '#00f5ff',
   shield: '#00ffaa',
   shieldGlow: '#00e5ff',
   double: '#ffd166',
@@ -107,6 +117,10 @@ export const PALETTE = {
   magnetGlow: '#ff75b5',
   slow: '#72efdd',
   slowGlow: '#00f5ff',
+  life: '#ff5d8f',
+  lifeGlow: '#ffd166',
+  bomb: '#ff6b35',
+  bombGlow: '#ffd166',
   gate: '#00ffaa',
   gateGlow: '#00f5ff',
   gateRing: '#ffd166',
@@ -124,6 +138,8 @@ export const PALETTE = {
   cometHomingRim: '#d946ef',
   cometMiniCore: '#280a1c',
   cometMiniRim: '#ff6b6b',
+  elite: '#b5179e',
+  eliteGlow: '#f72585',
   heartFull: '#ff2a85',
   heartGlow: '#ff75b5',
   heartEmpty: 'rgba(255, 255, 255, 0.16)',
@@ -139,6 +155,14 @@ export const PALETTE = {
   violet: '#c77dff',
   mint: '#00ffaa',
   danger: '#ff2a6d',
+};
+
+export const PARALLAX = {
+  layers: [
+    { speed: 0.15, size: 1, alpha: 0.5, count: 90 },
+    { speed: 0.4, size: 2, alpha: 0.75, count: 55 },
+    { speed: 0.9, size: 3, alpha: 1, count: 30 },
+  ],
 };
 
 // Preserve the renderer's zone visuals and the simulation's spawn rules.
@@ -237,6 +261,7 @@ export const CONFIG = {
   playerSpeed: PLAYER.speed,
   playerRadius: PLAYER.r,
   player: PLAYER,
+  dash: DASH,
   orbSpeed: ORB.speed,
   orbRadius: ORB.starRadius,
   bonusRadius: ORB.bonusRadius,
@@ -246,6 +271,7 @@ export const CONFIG = {
   cometSpeed: COMET.speed,
   cometRadius: COMET.r,
   comets: COMET,
+  elite: ELITE,
   doubleDuration: POWERUP.doubleDuration,
   magnetDuration: POWERUP.magnetDuration,
   slowDuration: POWERUP.slowDuration,
@@ -261,11 +287,13 @@ export const CONFIG = {
   comboTimeout: COMBO.duration,
   maxCombo: COMBO.max,
   combo: COMBO,
+  comboMilestones: COMBO_MILESTONES,
   levelDuration: LEVEL.seconds,
   levelSeconds: LEVEL.seconds,
   level: LEVEL,
   colors: PALETTE,
   palette: PALETTE,
+  parallax: PARALLAX,
 };
 
 export const config = CONFIG;

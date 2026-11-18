@@ -4,6 +4,15 @@
 
 let ctx = null;
 let noiseBuffer = null;
+const lastPlayedAt = Object.create(null);
+
+function canTrigger(tag, audioCtx, minGap = 0.08) {
+  const now = audioCtx.currentTime;
+  const prev = lastPlayedAt[tag];
+  if (prev !== undefined && now - prev < minGap) return false;
+  lastPlayedAt[tag] = now;
+  return true;
+}
 
 function getContext() {
   if (typeof window === 'undefined') return null;
@@ -187,7 +196,7 @@ export function playSlow() {
   }
 }
 
-/** Shimmering synth arpeggio when grabbing a shield, double, magnet, or slow power-up. */
+/** Shimmering synth arpeggio when grabbing a shield, double, magnet, slow, life, or bomb power-up. */
 export function playPowerup(kind = 'shield') {
   if (kind === 'magnet') {
     playMagnet();
@@ -197,16 +206,26 @@ export function playPowerup(kind = 'shield') {
     playSlow();
     return;
   }
+  if (kind === 'bomb') {
+    playBomb();
+    return;
+  }
   const audioCtx = getContext();
   if (!audioCtx) return;
+  if (kind === 'life' && !canTrigger('life', audioCtx, 0.08)) return;
   try {
     const now = audioCtx.currentTime;
-    const notes = kind === 'double' ? [587.33, 739.99, 880, 1174.66] : [523.25, 659.25, 783.99, 1046.5];
+    const notes =
+      kind === 'double'
+        ? [587.33, 739.99, 880, 1174.66]
+        : kind === 'life'
+          ? [523.25, 659.25, 783.99, 1046.5, 1318.51]
+          : [523.25, 659.25, 783.99, 1046.5];
     notes.forEach((freq, idx) => {
       const start = now + idx * 0.045;
       const osc = audioCtx.createOscillator();
       const gain = audioCtx.createGain();
-      osc.type = 'triangle';
+      osc.type = kind === 'life' ? 'sine' : 'triangle';
       osc.frequency.setValueAtTime(freq, start);
       gain.gain.setValueAtTime(0.001, start);
       gain.gain.linearRampToValueAtTime(0.14, start + 0.01);
@@ -394,6 +413,166 @@ export function playStart() {
   }
 }
 
+/** Short high-speed whoosh when triggering a dash burst. */
+export function playDash() {
+  const audioCtx = getContext();
+  if (!audioCtx || !canTrigger('dash', audioCtx, 0.08)) return;
+  try {
+    const now = audioCtx.currentTime;
+
+    // Band-passed filtered air whoosh
+    const noise = audioCtx.createBufferSource();
+    noise.buffer = getNoiseBuffer(audioCtx);
+    const filter = audioCtx.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.Q.setValueAtTime(1.6, now);
+    filter.frequency.setValueAtTime(1600, now);
+    filter.frequency.exponentialRampToValueAtTime(340, now + 0.16);
+
+    const nGain = audioCtx.createGain();
+    nGain.gain.setValueAtTime(0.001, now);
+    nGain.gain.linearRampToValueAtTime(0.22, now + 0.018);
+    nGain.gain.exponentialRampToValueAtTime(0.0008, now + 0.17);
+
+    noise.connect(filter);
+    filter.connect(nGain);
+    nGain.connect(audioCtx.destination);
+    noise.start(now);
+    noise.stop(now + 0.18);
+
+    // Crisp ion-thruster sweep
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(640, now);
+    osc.frequency.exponentialRampToValueAtTime(190, now + 0.15);
+    gain.gain.setValueAtTime(0.001, now);
+    gain.gain.linearRampToValueAtTime(0.14, now + 0.012);
+    gain.gain.exponentialRampToValueAtTime(0.0008, now + 0.16);
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start(now);
+    osc.stop(now + 0.17);
+  } catch {
+    // Ignore audio errors.
+  }
+}
+
+/** Deep resonant low boom when an elite comet enters or exits the field. */
+export function playElite() {
+  const audioCtx = getContext();
+  if (!audioCtx || !canTrigger('elite', audioCtx, 0.1)) return;
+  try {
+    const now = audioCtx.currentTime;
+
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(112, now);
+    osc.frequency.exponentialRampToValueAtTime(36, now + 0.34);
+
+    gain.gain.setValueAtTime(0.001, now);
+    gain.gain.linearRampToValueAtTime(0.26, now + 0.025);
+    gain.gain.exponentialRampToValueAtTime(0.0008, now + 0.36);
+
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start(now);
+    osc.stop(now + 0.38);
+
+    const sub = audioCtx.createOscillator();
+    const sGain = audioCtx.createGain();
+    sub.type = 'triangle';
+    sub.frequency.setValueAtTime(168, now);
+    sub.frequency.exponentialRampToValueAtTime(54, now + 0.28);
+    sGain.gain.setValueAtTime(0.001, now);
+    sGain.gain.linearRampToValueAtTime(0.11, now + 0.02);
+    sGain.gain.exponentialRampToValueAtTime(0.0008, now + 0.3);
+    sub.connect(sGain);
+    sGain.connect(audioCtx.destination);
+    sub.start(now);
+    sub.stop(now + 0.32);
+  } catch {
+    // Ignore audio errors.
+  }
+}
+
+/** Bright crystalline chime arpeggio when hitting a combo milestone (x5, x10). */
+export function playComboMilestone(combo = 5) {
+  const audioCtx = getContext();
+  if (!audioCtx || !canTrigger('milestone', audioCtx, 0.08)) return;
+  try {
+    const now = audioCtx.currentTime;
+    const notes =
+      combo >= 10
+        ? [659.25, 880, 1108.73, 1318.51, 1760]
+        : [587.33, 739.99, 880, 1174.66, 1479.98];
+    notes.forEach((freq, idx) => {
+      const start = now + idx * 0.04;
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = idx % 2 === 0 ? 'sine' : 'triangle';
+      osc.frequency.setValueAtTime(freq, start);
+      osc.frequency.exponentialRampToValueAtTime(freq * 1.03, start + 0.22);
+
+      gain.gain.setValueAtTime(0.001, start);
+      gain.gain.linearRampToValueAtTime(0.15, start + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.0008, start + 0.24);
+
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start(start);
+      osc.stop(start + 0.25);
+    });
+  } catch {
+    // Ignore audio errors.
+  }
+}
+
+/** Soft deep shockwave thump when a bomb power-up clears comets. */
+export function playBomb() {
+  const audioCtx = getContext();
+  if (!audioCtx || !canTrigger('bomb', audioCtx, 0.08)) return;
+  try {
+    const now = audioCtx.currentTime;
+
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(148, now);
+    osc.frequency.exponentialRampToValueAtTime(42, now + 0.26);
+
+    gain.gain.setValueAtTime(0.001, now);
+    gain.gain.linearRampToValueAtTime(0.24, now + 0.014);
+    gain.gain.exponentialRampToValueAtTime(0.0008, now + 0.28);
+
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start(now);
+    osc.stop(now + 0.3);
+
+    const noise = audioCtx.createBufferSource();
+    noise.buffer = getNoiseBuffer(audioCtx);
+    const filter = audioCtx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(720, now);
+    filter.frequency.exponentialRampToValueAtTime(140, now + 0.22);
+
+    const nGain = audioCtx.createGain();
+    nGain.gain.setValueAtTime(0.001, now);
+    nGain.gain.linearRampToValueAtTime(0.14, now + 0.012);
+    nGain.gain.exponentialRampToValueAtTime(0.0008, now + 0.24);
+
+    noise.connect(filter);
+    filter.connect(nGain);
+    nGain.connect(audioCtx.destination);
+    noise.start(now);
+    noise.stop(now + 0.25);
+  } catch {
+    // Ignore audio errors.
+  }
+}
+
 export function createAudio() {
   return {
     unlock: unlockAudio,
@@ -407,6 +586,11 @@ export function createAudio() {
     levelUp: playLevelUp,
     gameOver: playGameOver,
     start: playStart,
+    dash: playDash,
+    elite: playElite,
+    comboMilestone: playComboMilestone,
+    milestone: playComboMilestone,
+    bomb: playBomb,
   };
 }
 

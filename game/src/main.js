@@ -1,12 +1,13 @@
 // Main entry point and requestAnimationFrame loop for Stardust Courier.
 // Wires input.js, world.js (createWorld / updateWorld), render.js, audio.js, and shots.js.
 
-import { BEST_KEY, CONFIG, LIVES } from './config.js';
+import { CONFIG, LIVES } from './config.js';
 import { createWorld, updateWorld } from './world.js';
 import { createInput } from './input.js';
 import { createRenderer } from './render.js';
 import { stageShot } from './shots.js';
 import { createAudio } from './audio.js';
+import { loadBest, saveBest } from './progression.js';
 
 const MAX_FRAME = 0.1;
 
@@ -21,22 +22,6 @@ const canvas = document.getElementById('game');
 const statusEl = document.getElementById('status');
 const renderer = createRenderer(canvas);
 const audio = createAudio();
-
-function readBest() {
-  try {
-    return Number.parseInt(window.localStorage.getItem(BEST_KEY) ?? '0', 10) || 0;
-  } catch {
-    return 0;
-  }
-}
-
-function saveBest(value) {
-  try {
-    window.localStorage.setItem(BEST_KEY, String(value));
-  } catch {
-    // Ignore storage errors in private browsing mode.
-  }
-}
 
 function announce(message) {
   if (statusEl) statusEl.textContent = message;
@@ -59,7 +44,7 @@ function runGame() {
   const input = createInput(canvas);
   let runSeed = initialSeed;
   let state = createWorld({ ...CONFIG, seed: runSeed });
-  let best = readBest();
+  state.best = loadBest();
   let lastTime = performance.now();
 
   function startFromTitle() {
@@ -71,6 +56,7 @@ function runGame() {
   function restartFromOver() {
     runSeed = (runSeed + 0x9e3779b9) >>> 0;
     state = createWorld({ ...CONFIG, seed: runSeed });
+    state.best = loadBest();
     state.status = 'playing';
     audio.start();
     announce(`Restarted Stardust Courier. ${LIVES} lives.`);
@@ -161,17 +147,12 @@ function runGame() {
     }
 
     if (prevStatus !== 'over' && state.status === 'over') {
-      if (state.score > best) {
-        best = state.score;
-        saveBest(best);
-      }
+      state.best = saveBest(state.score);
       audio.gameOver();
-      announce(`Game over. Final score ${state.score}. Best score ${best}.`);
-    } else if (state.score > best) {
-      best = state.score;
-      saveBest(best);
+      announce(`Game over. Final score ${state.score}. Best score ${state.best}.`);
     }
 
+    const best = state.best;
     renderer.draw(state, best);
   }
 

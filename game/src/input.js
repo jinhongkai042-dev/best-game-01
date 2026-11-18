@@ -1,6 +1,6 @@
 // Unified keyboard (WASD / Arrow keys / Space / Enter) and mouse/pointer input handler.
 // Maps window pointer coordinates into the 1280x720 logical playfield and exposes the
-// exact fields expected by world.js ({ up, down, left, right, mouseX, mouseY, mouseDown })
+// exact fields expected by world.js ({ up, down, left, right, dash, mouseX, mouseY, mouseDown })
 // as well as action helpers for main.js.
 
 import { HEIGHT, WIDTH } from './config.js';
@@ -13,6 +13,7 @@ const LEFT_KEYS = new Set(['ArrowLeft', 'KeyA', 'a', 'A']);
 const RIGHT_KEYS = new Set(['ArrowRight', 'KeyD', 'd', 'D']);
 const UP_KEYS = new Set(['ArrowUp', 'KeyW', 'w', 'W']);
 const DOWN_KEYS = new Set(['ArrowDown', 'KeyS', 's', 'S']);
+const DASH_KEYS = new Set(['Space', ' ']);
 const CONFIRM_KEYS = new Set(['Space', 'Enter', ' ', 'NumpadEnter']);
 const PAUSE_KEYS = new Set(['KeyP', 'Escape', 'p', 'P']);
 
@@ -45,6 +46,7 @@ export function createInput(canvas = window) {
   let pointerDown = false;
   let actions = 0;
   let confirmPressed = false;
+  let dashPressed = false;
 
   function updateKeyFlags() {
     keyLeft = false;
@@ -62,6 +64,7 @@ export function createInput(canvas = window) {
   function onKeyDown(event) {
     unlockAudio();
     const code = event.code || event.key;
+    const isSpace = DASH_KEYS.has(code) || DASH_KEYS.has(event.key);
     if (
       LEFT_KEYS.has(code) ||
       RIGHT_KEYS.has(code) ||
@@ -75,11 +78,15 @@ export function createInput(canvas = window) {
       event.preventDefault();
       return;
     }
-    if (CONFIRM_KEYS.has(code)) {
+    if (CONFIRM_KEYS.has(code) || isSpace) {
       heldCodes.add(code);
       if (!event.repeat) {
         actions |= ACTION_CONFIRM;
         confirmPressed = true;
+        if (isSpace) {
+          dashPressed = true;
+          state.dash = true;
+        }
       }
       event.preventDefault();
       return;
@@ -124,6 +131,8 @@ export function createInput(canvas = window) {
     heldCodes.clear();
     updateKeyFlags();
     pointerDown = false;
+    dashPressed = false;
+    state.dash = false;
   }
 
   window.addEventListener('keydown', onKeyDown);
@@ -143,6 +152,7 @@ export function createInput(canvas = window) {
     right: false,
     up: false,
     down: false,
+    dash: false,
     dx: 0,
     dy: 0,
     mouseX: null,
@@ -168,6 +178,8 @@ export function createInput(canvas = window) {
       state.right = keyRight;
       state.up = keyUp;
       state.down = keyDown;
+      state.dash = dashPressed;
+      dashPressed = false;
       state.dx = dx;
       state.dy = dy;
 

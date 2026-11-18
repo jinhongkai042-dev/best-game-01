@@ -7,13 +7,66 @@
 //   comets: [{x, y, r, vx, vy, kind}], powerups: [{x, y, r, kind}],
 //   particles: [{x, y, vx, vy, life, color}] }
 
-import { COMBO, FONT, GATE, HEIGHT, LIVES, MONO_FONT, PALETTE, WIDTH, ZONES } from './config.js';
+import { COMBO, CONFIG, FONT, GATE, HEIGHT, LIVES, MONO_FONT, PALETTE, WIDTH, ZONES } from './config.js';
+import { playBomb, playComboMilestone, playDash, playElite, playPowerup } from './audio.js';
 
 export const SCREEN_TITLE = 'title';
 export const SCREEN_PLAY = 'playing';
 export const SCREEN_OVER = 'over';
 
-// Precomputed deterministic starfield layers (no runtime allocations).
+const STAR_HUES = ['#ffffff', '#bceeff', '#ffd6ff', '#ffe9a8', '#72efdd', '#ff9ebb'];
+
+function starHash(layerIdx, starIdx, salt) {
+  let h = ((layerIdx + 1) * 374761393 + (starIdx + 1) * 668265263 + salt * 1442695041) | 0;
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+}
+
+function isMilestoneHit(hits, milestone) {
+  if (!hits) return false;
+  if (hits instanceof Set) return hits.has(milestone);
+  if (Array.isArray(hits)) return hits.includes(milestone);
+  return Boolean(hits[milestone] || hits[String(milestone)]);
+}
+
+function getMilestoneBonus(milestone) {
+  const cfgMilestones = CONFIG && CONFIG.combo && CONFIG.combo.milestones;
+  if (cfgMilestones) {
+    if (Array.isArray(cfgMilestones)) {
+      const entry = cfgMilestones.find(
+        (m) => m && (m.combo === milestone || m.threshold === milestone || m.count === milestone || m.at === milestone),
+      );
+      if (entry && Number.isFinite(entry.bonus)) return entry.bonus;
+    } else if (Number.isFinite(cfgMilestones[milestone])) {
+      return cfgMilestones[milestone];
+    }
+  }
+  if (milestone === 5) return 50;
+  if (milestone === 10) return 150;
+  return milestone * 10;
+}
+
+function getDashCooldownMax(observedMax) {
+  const fromConfig =
+    (CONFIG && CONFIG.dash && Number.isFinite(CONFIG.dash.cooldown) && CONFIG.dash.cooldown) ||
+    (CONFIG && CONFIG.DASH && Number.isFinite(CONFIG.DASH.cooldown) && CONFIG.DASH.cooldown) ||
+    (CONFIG && Number.isFinite(CONFIG.dashCooldown) && CONFIG.dashCooldown) ||
+    0;
+  if (fromConfig > 0) return fromConfig;
+  return observedMax > 0 ? observedMax : 2.5;
+}
+
+function resolveBestScore(state, argBest) {
+  if (state && Number.isFinite(state.best)) {
+    return Math.max(0, Math.floor(state.best));
+  }
+  if (Number.isFinite(argBest) && argBest > 0) {
+    return Math.floor(argBest);
+  }
+  return null;
+}
+
+// Precomputed deterministic starfield layers (fallback if CONFIG.parallax is absent).
 const STARS = (() => {
   const list = [];
   let s = 0x9e3779b9;
@@ -168,30 +221,75 @@ function drawBackground(ctx, time, level, zoneNumber, slowTimer) {
   }
   ctx.restore();
 
-  // Parallax starfield
+  // Parallax starfield (uses CONFIG.parallax.layers deterministically when available)
   const speedScale = (1 + Math.max(0, (level || 1) - 1) * 0.18) * (slowTimer > 0 ? 0.5 : 1);
-  for (let i = 0; i < STARS.length; i += 1) {
-    const st = STARS[i];
-    const sy = ((st.y + time * st.speed * speedScale) % HEIGHT + HEIGHT) % HEIGHT;
-    const sx = ((st.x + Math.sin(time * 0.25 + st.phase) * (st.layer + 1) * 3) % WIDTH + WIDTH) % WIDTH;
-    const twinkle = 0.55 + 0.45 * Math.sin(time * 3.2 + st.phase);
+  const parallaxLayers =
+    CONFIG && CONFIG.parallax && Array.isArray(CONFIG.parallax.layers) && CONFIG.parallax.layers.length > 0
+      ? CONFIG.parallax.layers
+      : null;
 
-    ctx.globalAlpha = twinkle;
-    ctx.fillStyle = st.color;
+  if (parallaxLayers) {
+    for (let layerIdx = 0; layerIdx < parallaxLayers.length; layerIdx += 1) {
+      const layer = parallaxLayers[layerIdx] || {};
+      const speed = Number.isFinite(layer.speed) ? layer.speed : layerIdx === 0 ? 18 : layerIdx === 1 ? 45 : 95;
+      const size = Number.isFinite(layer.size) ? layer.size : layerIdx === 0 ? 1.1 : layerIdx === 1 ? 1.7 : 2.4;
+      const baseAlpha = Number.isFinite(layer.alpha) ? layer.alpha : layerIdx === 0 ? 0.45 : layerIdx === 1 ? 0.72 : 0.95;
+      const count = Math.max(0, Math.floor(Number.isFinite(layer.count) ? layer.count : 40));
+      const isForeground = layerIdx === parallaxLayers.length - 1;
 
-    if (st.layer === 2) {
-      const streak = Math.min(18, 4 + speedScale * 4);
-      ctx.strokeStyle = st.color;
-      ctx.lineWidth = st.r * 0.85;
-      ctx.beginPath();
-      ctx.moveTo(sx, sy - streak);
-      ctx.lineTo(sx, sy);
-      ctx.stroke();
+      for (let starIdx = 0; starIdx < count; starIdx += 1) {
+        const baseX = starHash(layerIdx, starIdx, 1) * WIDTH;
+        const baseY = starHash(layerIdx, starIdx, 2) * HEIGHT;
+        const phase = starHash(layerIdx, starIdx, 3) * Math.PI * 2;
+        const hue = STAR_HUES[Math.floor(starHash(layerIdx, starIdx, 4) * STAR_HUES.length)];
+        const radius = size * (0.75 + 0.5 * starHash(layerIdx, starIdx, 5));
+
+        const sy = ((baseY + time * speed * speedScale) % HEIGHT + HEIGHT) % HEIGHT;
+        const sx = ((baseX + Math.sin(time * 0.25 + phase) * (layerIdx + 1) * 2.5) % WIDTH + WIDTH) % WIDTH;
+        const twinkle = 0.65 + 0.35 * Math.sin(time * 3.0 + phase);
+
+        ctx.globalAlpha = Math.max(0, Math.min(1, baseAlpha * twinkle));
+        ctx.fillStyle = hue;
+
+        if (isForeground) {
+          const streak = Math.min(18, 4 + speedScale * 4);
+          ctx.strokeStyle = hue;
+          ctx.lineWidth = Math.max(0.9, radius * 0.75);
+          ctx.beginPath();
+          ctx.moveTo(sx, sy - streak);
+          ctx.lineTo(sx, sy);
+          ctx.stroke();
+        }
+
+        ctx.beginPath();
+        ctx.arc(sx, sy, radius, 0, Math.PI * 2);
+        ctx.fill();
+      }
     }
+  } else {
+    for (let i = 0; i < STARS.length; i += 1) {
+      const st = STARS[i];
+      const sy = ((st.y + time * st.speed * speedScale) % HEIGHT + HEIGHT) % HEIGHT;
+      const sx = ((st.x + Math.sin(time * 0.25 + st.phase) * (st.layer + 1) * 3) % WIDTH + WIDTH) % WIDTH;
+      const twinkle = 0.55 + 0.45 * Math.sin(time * 3.2 + st.phase);
 
-    ctx.beginPath();
-    ctx.arc(sx, sy, st.r, 0, Math.PI * 2);
-    ctx.fill();
+      ctx.globalAlpha = twinkle;
+      ctx.fillStyle = st.color;
+
+      if (st.layer === 2) {
+        const streak = Math.min(18, 4 + speedScale * 4);
+        ctx.strokeStyle = st.color;
+        ctx.lineWidth = st.r * 0.85;
+        ctx.beginPath();
+        ctx.moveTo(sx, sy - streak);
+        ctx.lineTo(sx, sy);
+        ctx.stroke();
+      }
+
+      ctx.beginPath();
+      ctx.arc(sx, sy, st.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
   }
   ctx.globalAlpha = 1;
 }
@@ -399,6 +497,24 @@ function getPowerupStyle(kind) {
       label: 'SLOW-MO',
     };
   }
+  if (kind === 'life') {
+    return {
+      primary: PALETTE.life || PALETTE.heartFull || '#ff4da6',
+      secondary: PALETTE.lifeGlow || PALETTE.heartGlow || '#ff99cc',
+      aura0: 'rgba(255, 77, 166, 0.58)',
+      aura1: 'rgba(255, 117, 181, 0.22)',
+      label: '+1 LIFE',
+    };
+  }
+  if (kind === 'bomb') {
+    return {
+      primary: PALETTE.bomb || '#ff7b29',
+      secondary: PALETTE.bombGlow || '#ffd166',
+      aura0: 'rgba(255, 123, 41, 0.62)',
+      aura1: 'rgba(255, 209, 102, 0.24)',
+      label: 'BOMB',
+    };
+  }
   return {
     primary: PALETTE.shield,
     secondary: PALETTE.shieldGlow,
@@ -498,6 +614,60 @@ function drawPowerups(ctx, powerups, time) {
       ctx.lineTo(x, y);
       ctx.lineTo(x + cr * 0.5, y + cr * 0.25);
       ctx.stroke();
+    } else if (kind === 'life') {
+      // Pink heart icon
+      const hs = r * 0.55;
+      ctx.beginPath();
+      ctx.moveTo(x, y + hs * 0.85);
+      ctx.bezierCurveTo(x - hs * 1.25, y + hs * 0.1, x - hs * 1.15, y - hs * 0.85, x - hs * 0.5, y - hs * 0.85);
+      ctx.bezierCurveTo(x - hs * 0.15, y - hs * 0.85, x, y - hs * 0.45, x, y - hs * 0.35);
+      ctx.bezierCurveTo(x, y - hs * 0.45, x + hs * 0.15, y - hs * 0.85, x + hs * 0.5, y - hs * 0.85);
+      ctx.bezierCurveTo(x + hs * 1.15, y - hs * 0.85, x + hs * 1.25, y + hs * 0.1, x, y + hs * 0.85);
+      ctx.closePath();
+      ctx.fillStyle = style.primary;
+      ctx.fill();
+      ctx.lineWidth = 1.2;
+      ctx.strokeStyle = '#ffd6eb';
+      ctx.stroke();
+
+      // Specular glint
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
+      ctx.beginPath();
+      ctx.ellipse(x - hs * 0.42, y - hs * 0.4, hs * 0.22, hs * 0.12, -0.5, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (kind === 'bomb') {
+      // Orange bomb sphere + fuse + pulsing spark
+      const br = r * 0.44;
+      const by = y + r * 0.12;
+      const bombGrad = ctx.createRadialGradient(x - br * 0.3, by - br * 0.3, br * 0.1, x, by, br);
+      bombGrad.addColorStop(0, '#ffe082');
+      bombGrad.addColorStop(0.5, style.primary);
+      bombGrad.addColorStop(1, '#b83b00');
+      ctx.fillStyle = bombGrad;
+      ctx.beginPath();
+      ctx.arc(x, by, br, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.lineWidth = 1.3;
+      ctx.strokeStyle = style.secondary;
+      ctx.stroke();
+
+      // Fuse collar
+      ctx.fillStyle = style.secondary;
+      ctx.fillRect(x - br * 0.26, by - br - 2, br * 0.52, 3);
+
+      // Curved fuse wire
+      ctx.strokeStyle = '#ffd166';
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.moveTo(x, by - br - 2);
+      ctx.quadraticCurveTo(x + br * 0.4, by - br - 7, x + br * 0.82, by - br - 4);
+      ctx.stroke();
+
+      // Pulsing fuse spark
+      const sparkR = r * (0.2 + 0.06 * Math.sin(time * 16 + i));
+      drawStarPolygon(ctx, x + br * 0.85, by - br - 4, 4, sparkR, sparkR * 0.4, time * 4);
+      ctx.fillStyle = '#ffffff';
+      ctx.fill();
     } else {
       // Shield crest icon
       const sr = r * 0.55;
@@ -532,7 +702,9 @@ function drawComets(ctx, comets, time) {
     const x = c.x;
     const y = c.y;
     const kind = c.kind || 'normal';
-    const baseR = c.r || (kind === 'mini' ? 11 : kind === 'splitter' ? 23 : 20);
+    const baseR =
+      c.r ||
+      (kind === 'mini' ? 11 : kind === 'elite' ? 32 : kind === 'splitter' ? 23 : 20);
     const r = kind === 'mini' ? Math.min(baseR, 14) : baseR;
     const vx = Number.isFinite(c.vx) ? c.vx : 0;
     const vy = Number.isFinite(c.vy) ? c.vy : 220;
@@ -540,19 +712,116 @@ function drawComets(ctx, comets, time) {
 
     // Homing comets have a short, focused plasma trail; mini comets have a compact trail
     const tailLen =
-      kind === 'homing'
-        ? r * 2.35
-        : kind === 'mini'
-          ? r * 3.1
-          : kind === 'splitter'
-            ? r * 4.0
-            : r * 4.4;
+      kind === 'elite'
+        ? r * 4.6
+        : kind === 'homing'
+          ? r * 2.35
+          : kind === 'mini'
+            ? r * 3.1
+            : kind === 'splitter'
+              ? r * 4.0
+              : r * 4.4;
 
     ctx.save();
     ctx.translate(x, y);
     ctx.rotate(angle);
 
-    if (kind === 'homing') {
+    if (kind === 'elite') {
+      const eliteRim = PALETTE.elite || '#e040fb';
+      const eliteGlow = PALETTE.eliteGlow || '#9d4edd';
+      const pulse = 1 + 0.14 * Math.sin(time * 6.5 + i * 1.1);
+
+      // Blazing magenta-purple plasma wake
+      const tailGrad = ctx.createLinearGradient(0, 0, -tailLen, 0);
+      tailGrad.addColorStop(0, 'rgba(224, 64, 251, 0.9)');
+      tailGrad.addColorStop(0.4, 'rgba(157, 78, 221, 0.52)');
+      tailGrad.addColorStop(1, 'rgba(26, 6, 43, 0)');
+      ctx.fillStyle = tailGrad;
+      ctx.beginPath();
+      ctx.moveTo(0, -r * 0.92);
+      ctx.quadraticCurveTo(-tailLen * 0.5, -r * 0.55 + Math.sin(time * 10 + i) * 4, -tailLen, 0);
+      ctx.quadraticCurveTo(-tailLen * 0.5, r * 0.55 + Math.cos(time * 10 + i) * 4, 0, r * 0.92);
+      ctx.closePath();
+      ctx.fill();
+
+      // White-magenta core jet
+      const innerTail = ctx.createLinearGradient(0, 0, -tailLen * 0.6, 0);
+      innerTail.addColorStop(0, 'rgba(255, 220, 255, 0.9)');
+      innerTail.addColorStop(1, 'rgba(224, 64, 251, 0)');
+      ctx.fillStyle = innerTail;
+      ctx.beginPath();
+      ctx.moveTo(0, -r * 0.4);
+      ctx.lineTo(-tailLen * 0.6, 0);
+      ctx.lineTo(0, r * 0.4);
+      ctx.closePath();
+      ctx.fill();
+
+      // Deep magenta/purple aura
+      const aura = ctx.createRadialGradient(0, 0, r * 0.35, 0, 0, r * 2.55 * pulse);
+      aura.addColorStop(0, 'rgba(224, 64, 251, 0.58)');
+      aura.addColorStop(0.55, 'rgba(157, 78, 221, 0.28)');
+      aura.addColorStop(1, 'rgba(157, 78, 221, 0)');
+      ctx.fillStyle = aura;
+      ctx.beginPath();
+      ctx.arc(0, 0, r * 2.55 * pulse, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Pulsing outer glow ring (unmistakable elite indicator)
+      ctx.save();
+      ctx.shadowColor = eliteGlow;
+      ctx.shadowBlur = 16;
+      ctx.strokeStyle = eliteRim;
+      ctx.lineWidth = 2.6;
+      ctx.globalAlpha = 0.65 + 0.3 * Math.sin(time * 7.5 + i);
+      ctx.beginPath();
+      ctx.arc(0, 0, r * (1.36 + 0.12 * Math.sin(time * 7.5 + i)), 0, Math.PI * 2);
+      ctx.stroke();
+
+      // Secondary counter-rotating threat arcs
+      ctx.strokeStyle = '#f5d0fe';
+      ctx.lineWidth = 1.8;
+      for (let a = 0; a < 3; a += 1) {
+        const startA = -time * 2.4 + (a * Math.PI * 2) / 3;
+        ctx.beginPath();
+        ctx.arc(0, 0, r * 1.58, startA, startA + Math.PI * 0.35);
+        ctx.stroke();
+      }
+      ctx.restore();
+
+      // Spiky boss-tier obsidian-violet body
+      ctx.rotate(time * 1.15 + i * 1.9);
+      const verts = 12;
+      ctx.beginPath();
+      for (let v = 0; v < verts; v += 1) {
+        const a = (v / verts) * Math.PI * 2;
+        const jag = v % 2 === 0 ? 1.14 : 0.8 + 0.06 * Math.sin(v * 2.7 + i);
+        const px = Math.cos(a) * r * jag;
+        const py = Math.sin(a) * r * jag;
+        if (v === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      }
+      ctx.closePath();
+      ctx.fillStyle = '#1c0630';
+      ctx.fill();
+      ctx.lineWidth = 3.2;
+      ctx.strokeStyle = eliteRim;
+      ctx.stroke();
+
+      // Inner magenta energy fissures & radiant core
+      ctx.strokeStyle = eliteRim;
+      ctx.lineWidth = 1.8;
+      for (let f = 0; f < 4; f += 1) {
+        const fa = (f * Math.PI) / 2 + 0.35;
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(Math.cos(fa) * r * 0.72, Math.sin(fa) * r * 0.72);
+        ctx.stroke();
+      }
+      ctx.fillStyle = '#f5d0fe';
+      ctx.beginPath();
+      ctx.arc(0, 0, r * 0.28 * pulse, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (kind === 'homing') {
       // Distinct violet/magenta seeker wake (short trail)
       const tailGrad = ctx.createLinearGradient(0, 0, -tailLen, 0);
       tailGrad.addColorStop(0, 'rgba(217, 70, 239, 0.88)');
@@ -806,13 +1075,50 @@ function drawParticles(ctx, particles, extraBursts) {
   ctx.restore();
 }
 
-function drawPlayer(ctx, state, trail) {
+function getDashDirection(state, points, x, y) {
+  if (state.dashDir && Number.isFinite(state.dashDir.x) && Number.isFinite(state.dashDir.y)) {
+    const len = Math.hypot(state.dashDir.x, state.dashDir.y);
+    if (len > 0.01) return { x: state.dashDir.x / len, y: state.dashDir.y / len };
+  }
+  if (Number.isFinite(state.dashDirX) && Number.isFinite(state.dashDirY)) {
+    const len = Math.hypot(state.dashDirX, state.dashDirY);
+    if (len > 0.01) return { x: state.dashDirX / len, y: state.dashDirY / len };
+  }
+  if (Number.isFinite(state.dashDx) && Number.isFinite(state.dashDy)) {
+    const len = Math.hypot(state.dashDx, state.dashDy);
+    if (len > 0.01) return { x: state.dashDx / len, y: state.dashDy / len };
+  }
+  if (typeof state.dashDir === 'number' && Number.isFinite(state.dashDir)) {
+    return { x: Math.cos(state.dashDir), y: Math.sin(state.dashDir) };
+  }
+  if (Number.isFinite(state.dashVx) && Number.isFinite(state.dashVy)) {
+    const len = Math.hypot(state.dashVx, state.dashVy);
+    if (len > 0.01) return { x: state.dashVx / len, y: state.dashVy / len };
+  }
+  if (Number.isFinite(state.dashAngle)) {
+    return { x: Math.cos(state.dashAngle), y: Math.sin(state.dashAngle) };
+  }
+  if (state.player && Number.isFinite(state.player.vx) && Number.isFinite(state.player.vy)) {
+    const len = Math.hypot(state.player.vx, state.player.vy);
+    if (len > 0.01) return { x: state.player.vx / len, y: state.player.vy / len };
+  }
+  const oldest = points[Math.max(0, points.length - 4)] || { x, y };
+  const dx = x - oldest.x;
+  const dy = y - oldest.y;
+  const len = Math.hypot(dx, dy);
+  if (len > 0.01) return { x: dx / len, y: dy / len };
+  return { x: 0, y: -1 };
+}
+
+function drawPlayer(ctx, state, trail, dashCooldownMax = 2.5) {
   const player = state.player;
   if (!player || !Number.isFinite(player.x) || !Number.isFinite(player.y)) return;
   const x = player.x;
   const y = player.y;
   const r = player.r || 16;
   const time = state.time || 0;
+  const isDashing = Boolean(state.isDashing);
+  const dashCooldown = Math.max(0, state.dashCooldown || 0);
 
   // Faint attraction ring around player while magnetTimer > 0
   if (state.magnetTimer > 0) {
@@ -859,6 +1165,80 @@ function drawPlayer(ctx, state, trail) {
   const dx = x - oldest.x;
   const dy = y - oldest.y;
   const bankAngle = Math.max(-0.35, Math.min(0.35, dx * 0.015));
+
+  // DASH: bright cyan-white stretched trail along dash direction + speed lines
+  if (isDashing) {
+    const dir = getDashDirection(state, points, x, y);
+    const dashAngle = Math.atan2(dir.y, dir.x);
+    const dashLen = r * 7.8;
+
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.translate(x, y);
+    ctx.rotate(dashAngle);
+
+    // Outer stretched cyan-white plasma wake
+    const wakeGrad = ctx.createLinearGradient(r * 0.5, 0, -dashLen, 0);
+    wakeGrad.addColorStop(0, 'rgba(255, 255, 255, 0.95)');
+    wakeGrad.addColorStop(0.25, 'rgba(0, 245, 255, 0.85)');
+    wakeGrad.addColorStop(0.65, 'rgba(0, 200, 255, 0.35)');
+    wakeGrad.addColorStop(1, 'rgba(0, 245, 255, 0)');
+    ctx.fillStyle = wakeGrad;
+    ctx.beginPath();
+    ctx.moveTo(r * 0.6, -r * 0.95);
+    ctx.quadraticCurveTo(-dashLen * 0.4, -r * 0.65, -dashLen, 0);
+    ctx.quadraticCurveTo(-dashLen * 0.4, r * 0.65, r * 0.6, r * 0.95);
+    ctx.closePath();
+    ctx.fill();
+
+    // Inner blinding white core streak
+    const coreGrad = ctx.createLinearGradient(r * 0.4, 0, -dashLen * 0.72, 0);
+    coreGrad.addColorStop(0, 'rgba(255, 255, 255, 1)');
+    coreGrad.addColorStop(0.5, 'rgba(180, 252, 255, 0.72)');
+    coreGrad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+    ctx.fillStyle = coreGrad;
+    ctx.beginPath();
+    ctx.moveTo(r * 0.4, -r * 0.38);
+    ctx.lineTo(-dashLen * 0.72, 0);
+    ctx.lineTo(r * 0.4, r * 0.38);
+    ctx.closePath();
+    ctx.fill();
+
+    // Ghosted cyan-white chevron afterimages trailing behind the ship
+    for (let g = 1; g <= 3; g += 1) {
+      const gx = -g * r * 1.65;
+      const gAlpha = 0.46 - g * 0.12;
+      const gScale = 1 - g * 0.1;
+      ctx.strokeStyle = `rgba(184, 248, 255, ${gAlpha.toFixed(3)})`;
+      ctx.lineWidth = 2.2;
+      ctx.beginPath();
+      ctx.moveTo(gx + r * 0.85 * gScale, 0);
+      ctx.lineTo(gx - r * 0.55 * gScale, -r * 0.95 * gScale);
+      ctx.moveTo(gx + r * 0.85 * gScale, 0);
+      ctx.lineTo(gx - r * 0.55 * gScale, r * 0.95 * gScale);
+      ctx.stroke();
+    }
+
+    // Deterministic short speed-line streaks flanking the dash corridor
+    for (let s = 0; s < 8; s += 1) {
+      const side = s % 2 === 0 ? -1 : 1;
+      const lateral = side * (r * 1.15 + ((s * 17) % 5) * r * 0.52);
+      const phase = ((time * 16 + s * 0.37) % 1);
+      const startX = r * 1.2 - phase * dashLen * 0.65 - (s % 3) * r * 0.7;
+      const lineLen = r * (1.8 + (s % 3) * 0.85);
+      const alpha = (1 - phase * 0.65) * 0.72;
+      ctx.strokeStyle = s % 3 === 0
+        ? `rgba(255, 255, 255, ${alpha.toFixed(3)})`
+        : `rgba(0, 245, 255, ${alpha.toFixed(3)})`;
+      ctx.lineWidth = s % 3 === 0 ? 2.1 : 1.4;
+      ctx.beginPath();
+      ctx.moveTo(startX, lateral);
+      ctx.lineTo(startX - lineLen, lateral);
+      ctx.stroke();
+    }
+
+    ctx.restore();
+  }
 
   ctx.save();
   ctx.globalCompositeOperation = 'lighter';
@@ -983,6 +1363,19 @@ function drawPlayer(ctx, state, trail) {
     ctx.setLineDash([]);
   }
 
+  // Active dash cyan-white shock halo around ship
+  if (isDashing) {
+    ctx.save();
+    ctx.shadowColor = '#00f5ff';
+    ctx.shadowBlur = 18;
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 2.4;
+    ctx.beginPath();
+    ctx.arc(0, 0, r * 1.48, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
+
   // Active shield hexagonal forcefield
   if (state.shield) {
     const shieldR = r * 1.82;
@@ -1007,6 +1400,65 @@ function drawPlayer(ctx, state, trail) {
     ctx.stroke();
   }
 
+  ctx.restore();
+
+  // Thin refilling dash-cooldown bar right beneath the ship while cooling down
+  if (dashCooldown > 0 && state.status === 'playing') {
+    const fill = Math.max(0, Math.min(1, 1 - dashCooldown / Math.max(0.1, dashCooldownMax)));
+    const barW = 40;
+    const barH = 4.5;
+    const bx = x - barW / 2;
+    const by = y + r * 2.05;
+    ctx.save();
+    roundedRect(ctx, bx - 1, by - 1, barW + 2, barH + 2, 3);
+    ctx.fillStyle = 'rgba(4, 10, 26, 0.8)';
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(0, 245, 255, 0.42)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    if (fill > 0) {
+      roundedRect(ctx, bx, by, barW * fill, barH, 2);
+      ctx.fillStyle = '#00f5ff';
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+}
+
+function drawMilestoneBanners(ctx, milestoneBanners) {
+  if (!Array.isArray(milestoneBanners) || milestoneBanners.length === 0) return;
+  ctx.save();
+  for (let i = 0; i < milestoneBanners.length; i += 1) {
+    const b = milestoneBanners[i];
+    if (!b || b.life <= 0) continue;
+    const ratio = Math.max(0, Math.min(1, b.life / b.maxLife));
+    const elapsed = 1 - ratio;
+    const alpha = Math.min(1, ratio * 1.45);
+    const cx = Math.max(120, Math.min(WIDTH - 120, b.x));
+    const cy = Math.max(120, b.y - elapsed * 36);
+
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.font = `900 18px ${FONT}`;
+    const textW = Math.max(150, ctx.measureText(b.text).width + 34);
+    const pillH = 34;
+
+    roundedRect(ctx, cx - textW / 2, cy - pillH / 2, textW, pillH, 17);
+    ctx.fillStyle = 'rgba(18, 12, 4, 0.84)';
+    ctx.fill();
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = PALETTE.gold;
+    ctx.stroke();
+
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.shadowColor = PALETTE.gold;
+    ctx.shadowBlur = 14;
+    ctx.fillStyle = '#fff5cc';
+    ctx.fillText(b.text, cx, cy + 0.5);
+    ctx.restore();
+  }
   ctx.restore();
 }
 
@@ -1047,7 +1499,7 @@ function drawZoneBanner(ctx, state) {
   ctx.restore();
 }
 
-function drawHud(ctx, state) {
+function drawHud(ctx, state, dashCooldownMax = 2.5) {
   const score = Math.max(0, Math.floor(state.score || 0));
   const lives = Math.max(0, Math.floor(state.lives ?? LIVES));
   const level = Math.max(1, Math.floor(state.level || 1));
@@ -1203,7 +1655,9 @@ function drawHud(ctx, state) {
   }
 
   // 3. Top-Right Hull Lives (Hearts)
-  const rightW = 204;
+  const maxLives = Math.max(LIVES, lives);
+  const heartStep = maxLives <= 3 ? 38 : maxLives <= 5 ? 34 : 28;
+  const rightW = maxLives <= 3 ? 204 : 86 + (maxLives - 1) * heartStep + 30;
   const rightX = WIDTH - 22 - rightW;
   roundedRect(ctx, rightX, 18, rightW, 60, 12);
   ctx.fillStyle = PALETTE.hudBg;
@@ -1218,11 +1672,53 @@ function drawHud(ctx, state) {
   ctx.textBaseline = 'middle';
   ctx.fillText('LIVES', rightX + 18, 48);
 
-  const maxLives = Math.max(LIVES, lives);
+  const heartSize = maxLives > 5 ? 22 : 26;
   for (let i = 0; i < maxLives; i += 1) {
-    const hx = rightX + 86 + i * 38;
+    const hx = rightX + 86 + i * heartStep;
     const hy = 48;
-    drawHeart(ctx, hx, hy, 26, i < lives);
+    drawHeart(ctx, hx, hy, heartSize, i < lives);
+  }
+
+  // Compact Dash status / cooldown refill bar directly beneath LIVES panel
+  const isDashing = Boolean(state.isDashing);
+  const dashCooldown = Math.max(0, state.dashCooldown || 0);
+  if (isDashing || dashCooldown > 0) {
+    const dashY = 84;
+    const dashH = 24;
+    roundedRect(ctx, rightX, dashY, rightW, dashH, 8);
+    ctx.fillStyle = isDashing ? 'rgba(0, 245, 255, 0.24)' : PALETTE.hudBg;
+    ctx.fill();
+    ctx.lineWidth = 1.3;
+    ctx.strokeStyle = isDashing ? '#ffffff' : PALETTE.hudBorder;
+    ctx.stroke();
+
+    ctx.font = `bold 11px ${FONT}`;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = isDashing ? '#ffffff' : PALETTE.cyan;
+    ctx.fillText('DASH', rightX + 12, dashY + dashH / 2 + 0.5);
+
+    const barX = rightX + 56;
+    const barW = rightW - 104;
+    const barY = dashY + 8;
+    const barH = 8;
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.14)';
+    roundedRect(ctx, barX, barY, barW, barH, 4);
+    ctx.fill();
+
+    const fill = isDashing
+      ? 1
+      : Math.max(0, Math.min(1, 1 - dashCooldown / Math.max(0.1, dashCooldownMax)));
+    if (fill > 0) {
+      roundedRect(ctx, barX, barY, barW * fill, barH, 4);
+      ctx.fillStyle = isDashing ? '#ffffff' : PALETTE.cyan;
+      ctx.fill();
+    }
+
+    ctx.font = `bold 11px ${MONO_FONT}`;
+    ctx.textAlign = 'right';
+    ctx.fillStyle = isDashing ? '#ffffff' : PALETTE.muted;
+    ctx.fillText(isDashing ? 'GO!' : `${dashCooldown.toFixed(1)}s`, rightX + rightW - 10, dashY + dashH / 2 + 0.5);
   }
 
   ctx.restore();
@@ -1307,15 +1803,15 @@ function drawTitleOverlay(ctx, state, bestScore) {
       color: PALETTE.cyan,
     },
     {
-      title: '4 POWER-UP PODS',
-      sub1: 'Shield · 2× Overdrive',
-      sub2: 'Magnet Pull · Chrono Slow',
+      title: '6 POWER-UP PODS',
+      sub1: 'Shield · 2× · Magnet · Slow',
+      sub2: '+1 Life Heart · Nova Bomb',
       color: PALETTE.shield,
     },
     {
       title: 'VOID HAZARDS',
-      sub1: 'Normal & Mini Shards',
-      sub2: 'Splitter & Homing Comets',
+      sub1: 'Splitter & Homing Comets',
+      sub2: 'Elite Comets · Space Dash',
       color: PALETTE.danger,
     },
   ];
@@ -1340,11 +1836,12 @@ function drawTitleOverlay(ctx, state, bestScore) {
     ctx.fillText(cards[i].sub2, bx + boxW / 2, boxY + 88);
   }
 
-  // Controls & Best Score
+  // Controls & Best Score (reads state.best; shows nothing if undefined)
+  const resolvedBest = resolveBestScore(state, bestScore);
   ctx.font = `bold 15px ${FONT}`;
   ctx.fillStyle = PALETTE.gold;
-  const bestText = bestScore > 0 ? `   ·   BEST SCORE: ${bestScore.toLocaleString('en-US')}` : '';
-  ctx.fillText(`CONTROLS:  ARROW KEYS / WASD  or  MOUSE${bestText}`, cx, cardY + 345);
+  const bestText = resolvedBest !== null ? `   ·   BEST  ${resolvedBest.toLocaleString('en-US')}` : '';
+  ctx.fillText(`CONTROLS:  WASD / ARROWS · MOUSE · SPACE DASH${bestText}`, cx, cardY + 345);
 
   // Pulsing Press to Start Button
   const pulse = 0.85 + 0.15 * Math.sin(time * 5);
@@ -1377,7 +1874,7 @@ function drawTitleOverlay(ctx, state, bestScore) {
 function drawGameOverOverlay(ctx, state, bestScore) {
   const time = state.time || 0;
   const score = Math.max(0, Math.floor(state.score || 0));
-  const best = Math.max(score, Math.floor(bestScore || 0));
+  const resolvedBest = resolveBestScore(state, bestScore);
   const level = Math.max(1, Math.floor(state.level || 1));
   const zoneNum = Math.max(1, Math.min(3, Math.floor(state.zone || 1)));
   const zoneCfg = getZoneConfig(zoneNum);
@@ -1440,9 +1937,12 @@ function drawGameOverOverlay(ctx, state, bestScore) {
   ctx.fillStyle = PALETTE.cyan;
   ctx.fillText(score.toLocaleString('en-US'), cx, cardY + 218);
 
-  ctx.font = `bold 15px ${FONT}`;
-  ctx.fillStyle = PALETTE.gold;
-  ctx.fillText(`BEST RECORD: ${best.toLocaleString('en-US')} PTS`, cx, cardY + 256);
+  if (resolvedBest !== null) {
+    const bestDisplay = Math.max(score, resolvedBest);
+    ctx.font = `bold 15px ${FONT}`;
+    ctx.fillStyle = PALETTE.gold;
+    ctx.fillText(`BEST  ${bestDisplay.toLocaleString('en-US')}`, cx, cardY + 256);
+  }
 
   // Restart Prompt Button
   const pulse = 0.86 + 0.14 * Math.sin(time * 5);
@@ -1470,8 +1970,10 @@ export function createRenderer(canvas) {
   const view = { scale: 1, x: 0, y: 0 };
   const trail = [];
   const extraBursts = [];
+  const milestoneBanners = [];
 
-  // Internal renderer-only tracking for hit screen shake & pickup/delivery bursts (never mutates state).
+  // Internal renderer-only tracking for hit screen shake & pickup/delivery/milestone/bomb bursts (never mutates state).
+  let wasPlaying = false;
   let prevLives = null;
   let prevShield = null;
   let prevDouble = 0;
@@ -1479,10 +1981,18 @@ export function createRenderer(canvas) {
   let prevSlow = 0;
   let prevGateActive = false;
   let prevDeliverCount = 0;
+  let prevIsDashing = false;
+  let prevEliteCount = 0;
+  let prevCometCount = 0;
+  let prevBombCount = 0;
+  let prevMilestonesHit = Object.create(null);
+  let maxObservedDashCd = 0;
   let lastGatePos = { x: WIDTH / 2, y: HEIGHT * 0.3 };
   let prevTime = 0;
   let shakeTime = 0;
   let deliveryFlash = 0;
+  let bombFlash = 0;
+  let milestoneFlash = 0;
 
   function resize() {
     const ratio = window.devicePixelRatio || 1;
@@ -1511,6 +2021,18 @@ export function createRenderer(canvas) {
     if (extraBursts.length > 12) extraBursts.shift();
   }
 
+  function addMilestoneBanner(milestone, x, y) {
+    const bonus = getMilestoneBonus(milestone);
+    milestoneBanners.push({
+      text: `COMBO ×${milestone}  +${bonus}`,
+      x,
+      y: y - 40,
+      life: 1.0,
+      maxLife: 1.0,
+    });
+    if (milestoneBanners.length > 4) milestoneBanners.shift();
+  }
+
   function draw(state, screenOrBest = 0, maybeBest = 0) {
     if (!state) return;
     resize();
@@ -1533,13 +2055,38 @@ export function createRenderer(canvas) {
     const px = state.player && Number.isFinite(state.player.x) ? state.player.x : WIDTH / 2;
     const py = state.player && Number.isFinite(state.player.y) ? state.player.y : HEIGHT / 2;
 
+    if ((state.dashCooldown || 0) > maxObservedDashCd) {
+      maxObservedDashCd = state.dashCooldown;
+    }
+    const dashCooldownMax = getDashCooldownMax(maxObservedDashCd);
+
+    const cometsArr = Array.isArray(state.comets) ? state.comets : [];
+    const powerupsArr = Array.isArray(state.powerups) ? state.powerups : [];
+    const curCometCount = cometsArr.length;
+    let curEliteCount = 0;
+    for (let i = 0; i < cometsArr.length; i += 1) {
+      if (cometsArr[i] && cometsArr[i].kind === 'elite') curEliteCount += 1;
+    }
+    let curBombCount = 0;
+    for (let i = 0; i < powerupsArr.length; i += 1) {
+      if (powerupsArr[i] && powerupsArr[i].kind === 'bomb') curBombCount += 1;
+    }
+
     if (status === 'playing') {
+      const isDashingNow = Boolean(state.isDashing);
+
       // Detect player hit for brief screen shake
       if (
         (prevLives !== null && state.lives < prevLives) ||
         (prevShield === true && !state.shield)
       ) {
         shakeTime = 0.28;
+      }
+
+      // Detect life heart pickup
+      if (wasPlaying && prevLives !== null && state.lives > prevLives) {
+        addExtraBurst(px, py, PALETTE.life || PALETTE.heartFull || '#ff4da6', false);
+        playPowerup('life');
       }
 
       // Detect power-up pickups for juicy pickup burst ring
@@ -1556,6 +2103,51 @@ export function createRenderer(canvas) {
         addExtraBurst(px, py, PALETTE.slow, false);
       }
 
+      // Detect dash start
+      if (wasPlaying && !prevIsDashing && isDashingNow) {
+        addExtraBurst(px, py, PALETTE.cyan, false);
+        playDash();
+      }
+
+      // Detect elite comet spawn or exit
+      if (wasPlaying && curEliteCount !== prevEliteCount) {
+        playElite();
+      }
+
+      // Detect bomb comet clear (bomb powerup removed + all comets cleared, or sudden clear of >=2 comets)
+      const bombRemoved = curBombCount < prevBombCount;
+      const suddenCometClear =
+        wasPlaying &&
+        curCometCount === 0 &&
+        state.lives === prevLives &&
+        Boolean(state.shield) === prevShield &&
+        ((bombRemoved && prevCometCount >= 1) || prevCometCount >= 3);
+      if (suddenCometClear) {
+        bombFlash = 0.36;
+        addExtraBurst(px, py, PALETTE.bomb || '#ff7b29', true);
+        playBomb();
+      }
+
+      // Detect combo milestones (5 and 10 via state.comboMilestonesHit)
+      const hits = state.comboMilestonesHit;
+      const milestonesToCheck = [5, 10];
+      let highestNewlyHit = 0;
+      for (let mIdx = 0; mIdx < milestonesToCheck.length; mIdx += 1) {
+        const m = milestonesToCheck[mIdx];
+        const hitNow = isMilestoneHit(hits, m);
+        if (hitNow && !prevMilestonesHit[m] && (state.combo || 0) >= m) {
+          highestNewlyHit = m;
+        }
+        prevMilestonesHit[m] = hitNow;
+      }
+      if (highestNewlyHit > 0) {
+        addMilestoneBanner(highestNewlyHit, px, py);
+        if (wasPlaying) {
+          milestoneFlash = 0.24;
+          playComboMilestone(highestNewlyHit);
+        }
+      }
+
       // Detect gate delivery completion for bright portal burst
       const gateNow = Boolean(state.gate && state.gate.active);
       const delivNow = state.deliverCount || 0;
@@ -1568,6 +2160,7 @@ export function createRenderer(canvas) {
         deliveryFlash = 0.35;
       }
 
+      wasPlaying = true;
       prevLives = state.lives;
       prevShield = Boolean(state.shield);
       prevDouble = state.doubleTimer || 0;
@@ -1575,7 +2168,12 @@ export function createRenderer(canvas) {
       prevSlow = state.slowTimer || 0;
       prevGateActive = gateNow;
       prevDeliverCount = delivNow;
+      prevIsDashing = isDashingNow;
+      prevEliteCount = curEliteCount;
+      prevCometCount = curCometCount;
+      prevBombCount = curBombCount;
     } else {
+      wasPlaying = false;
       prevLives = state.lives;
       prevShield = Boolean(state.shield);
       prevDouble = state.doubleTimer || 0;
@@ -1583,9 +2181,17 @@ export function createRenderer(canvas) {
       prevSlow = state.slowTimer || 0;
       prevGateActive = Boolean(state.gate && state.gate.active);
       prevDeliverCount = state.deliverCount || 0;
+      prevIsDashing = false;
+      prevEliteCount = curEliteCount;
+      prevCometCount = curCometCount;
+      prevBombCount = curBombCount;
+      prevMilestonesHit = Object.create(null);
       shakeTime = 0;
       deliveryFlash = 0;
+      bombFlash = 0;
+      milestoneFlash = 0;
       extraBursts.length = 0;
+      milestoneBanners.length = 0;
     }
 
     if (shakeTime > 0) {
@@ -1594,9 +2200,19 @@ export function createRenderer(canvas) {
     if (deliveryFlash > 0) {
       deliveryFlash = Math.max(0, deliveryFlash - dt);
     }
+    if (bombFlash > 0) {
+      bombFlash = Math.max(0, bombFlash - dt);
+    }
+    if (milestoneFlash > 0) {
+      milestoneFlash = Math.max(0, milestoneFlash - dt);
+    }
     for (let i = extraBursts.length - 1; i >= 0; i -= 1) {
       extraBursts[i].life -= dt;
       if (extraBursts[i].life <= 0) extraBursts.splice(i, 1);
+    }
+    for (let i = milestoneBanners.length - 1; i >= 0; i -= 1) {
+      milestoneBanners[i].life -= dt;
+      if (milestoneBanners[i].life <= 0) milestoneBanners.splice(i, 1);
     }
 
     // Update ship trail history from state.player (reset on non-playing screen or position jump)
@@ -1655,8 +2271,9 @@ export function createRenderer(canvas) {
     drawOrbs(ctx, orbsToDraw, state.player, state.magnetTimer || 0, nowTime);
     drawPowerups(ctx, state.powerups, nowTime);
     drawComets(ctx, cometsToDraw, nowTime);
-    drawPlayer(ctx, state, trail);
+    drawPlayer(ctx, state, trail, dashCooldownMax);
     drawParticles(ctx, state.particles, extraBursts);
+    drawMilestoneBanners(ctx, milestoneBanners);
 
     // Slight chrono-cyan scene tint while slowTimer > 0
     if ((state.slowTimer || 0) > 0) {
@@ -1667,6 +2284,23 @@ export function createRenderer(canvas) {
       ctx.fillStyle = slowGrad;
       ctx.fillRect(0, 0, WIDTH, HEIGHT);
       ctx.restore();
+    }
+
+    // Brief full-screen orange-white flash when bomb clears comets
+    if (bombFlash > 0) {
+      const bfAlpha = Math.min(1, bombFlash / 0.36);
+      const bombGrad = ctx.createRadialGradient(px, py, 20, px, py, 900);
+      bombGrad.addColorStop(0, `rgba(255, 255, 240, ${(bfAlpha * 0.65).toFixed(3)})`);
+      bombGrad.addColorStop(0.45, `rgba(255, 145, 45, ${(bfAlpha * 0.42).toFixed(3)})`);
+      bombGrad.addColorStop(1, `rgba(255, 90, 20, ${(bfAlpha * 0.16).toFixed(3)})`);
+      ctx.fillStyle = bombGrad;
+      ctx.fillRect(0, 0, WIDTH, HEIGHT);
+    }
+
+    // Subtle gold flash when hitting a combo milestone
+    if (milestoneFlash > 0) {
+      ctx.fillStyle = `rgba(255, 215, 102, ${(milestoneFlash * 0.35).toFixed(3)})`;
+      ctx.fillRect(0, 0, WIDTH, HEIGHT);
     }
 
     // Bright emerald/cyan flash when gate delivery completes
@@ -1685,9 +2319,9 @@ export function createRenderer(canvas) {
       drawTitleOverlay(ctx, state, bestScore);
     } else if (status === 'over') {
       drawGameOverOverlay(ctx, state, bestScore);
-      drawHud(ctx, state);
+      drawHud(ctx, state, dashCooldownMax);
     } else {
-      drawHud(ctx, state);
+      drawHud(ctx, state, dashCooldownMax);
       drawZoneBanner(ctx, state);
     }
 

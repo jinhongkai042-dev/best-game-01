@@ -12,6 +12,9 @@ const MAX_ORBS = 96;
 const MAX_COMETS = 80;
 const MAX_PARTICLES = 256;
 const { ORB, COMET, POWERUP, DELIVERY } = defaults;
+const DASH = defaults.DASH;
+const ELITE = defaults.ELITE;
+const COMBO_MILESTONES = defaults.COMBO_MILESTONES;
 
 const clamp = (value, low, high) => Math.max(low, Math.min(high, value));
 const positive = (value, fallback) => Number.isFinite(value) && value > 0 ? value : fallback;
@@ -55,6 +58,10 @@ export function createWorld(config = {}) {
     gate: null,
     magnetTimer: 0,
     slowTimer: 0,
+    dashCooldown: 0,
+    dashTimer: 0,
+    isDashing: false,
+    comboMilestonesHit: {},
     player: { x: width / 2, y: height * 0.62, r: radius },
     orbs: [],
     comets: [],
@@ -100,14 +107,19 @@ function spawnOrb(state, data, background = false) {
   });
 }
 
+function cometLoad(kind) {
+  return kind === 'splitter' || kind === 'elite' ? 2 : 1;
+}
+
 function spawnComet(state, data) {
   const zone = currentZone(state, data);
   const random = data.random;
-  const kind = chooseKind(random, zone.cometWeights);
-  // Reserve two slots per splitter so both children fit without dropping hazards.
-  const load = state.comets.reduce((sum, comet) => sum + (comet.kind === 'splitter' ? 2 : 1), 0);
-  if (load + (kind === 'splitter' ? 2 : 1) > MAX_COMETS) return;
-  const r = Math.min(
+  let kind = chooseKind(random, zone.cometWeights);
+  if ((state.zone === 2 || state.zone === 3) && random() < ELITE.spawnWeight) kind = 'elite';
+  // Reserve two slots for each splitter and elite.
+  const load = state.comets.reduce((sum, comet) => sum + cometLoad(comet.kind), 0);
+  if (load + cometLoad(kind) > MAX_COMETS) return;
+  const r = kind === 'elite' ? ELITE.r : Math.min(
     COMET.minRadius + random() * (COMET.maxRadius - COMET.minRadius),
     data.width / 4, data.height / 4,
   );
@@ -126,10 +138,29 @@ function spawnComet(state, data) {
   if (kind === 'homing') {
     // Even in late levels, a homing comet remains slower than the courier.
     speed = Math.min(speed * COMET.homingSpeedMultiplier, data.speed * 0.72);
+  } else if (kind === 'elite') {
+    speed = Math.min(speed * ELITE.speedMultiplier, data.speed * 0.72);
   }
   const comet = { x, y, r, vx: dx / distance * speed, vy: dy / distance * speed, kind };
   state.comets.push(comet);
   data.cometMeta.set(comet, { age: 0, entered: false });
+}
+
+function dropEliteOrbs(state, data, comet) {
+  const r = Math.min(ORB.bonusRadius, data.width / 2, data.height / 2);
+  const x = clamp(comet.x, r, data.width - r);
+  const y = clamp(comet.y, r, data.height - r);
+  const minX = Math.max(r, x - comet.r);
+  const maxX = Math.min(data.width - r, x + comet.r);
+  const minY = Math.max(r, y - comet.r);
+  const maxY = Math.min(data.height - r, y + comet.r);
+  for (let i = 0; i < ELITE.dropOrbs && state.orbs.length < MAX_ORBS; i += 1) {
+    state.orbs.push({
+      x: minX + data.random() * (maxX - minX),
+      y: minY + data.random() * (maxY - minY),
+      r, kind: 'bonus',
+    });
+  }
 }
 
 function spawnPowerup(state, data) {
@@ -201,9 +232,25 @@ function movePlayer(state, data, input, dt) {
     distance = Math.hypot(dx, dy);
     speed = Math.min(speed, distance * 8);
   }
+  const dashing = state.dashTimer > 0;
+  if (dashing) {
+    if (distance <= EPSILON) {
+      dx = data.vx;
+      dy = data.vy;
+      distance = Math.hypot(dx, dy);
+      if (distance <= EPSILON) {
+        dx = 0;
+        dy = -1;
+        distance = 1;
+      }
+    }
+    speed = DASH.speed;
+    state.dashTimer = countdown(state.dashTimer, dt);
+    if (state.dashTimer === 0) state.isDashing = false;
+  }
   const targetVx = distance > 0 ? dx / distance * speed : 0;
   const targetVy = distance > 0 ? dy / distance * speed : 0;
-  const blend = 1 - Math.exp(-18 * dt);
+  const blend = dashing ? 1 : 1 - Math.exp(-18 * dt);
   data.vx += (targetVx - data.vx) * blend;
   data.vy += (targetVy - data.vy) * blend;
   player.x = clamp(player.x + data.vx * dt, player.r, data.width - player.r);
@@ -235,6 +282,11 @@ function updateTitle(state, data, dt) {
       orb.x = orb.r + data.backgroundRandom() * (data.width - 2 * orb.r);
     }
   }
+}
+
+function isCometVisible(data, comet) {
+  const { x, y, r } = comet;
+  return x + r >= 0 && x - r <= data.width && y + r >= 0 && y - r <= data.height;
 }
 
 function steerHoming(comet, player, dt) {
@@ -277,12 +329,23 @@ function splitComet(state, data, comet, fragments, exited) {
 
 function updatePlaying(state, data, input, dt) {
   state.time += dt;
+  const comboWasActive = state.comboTimer > 0;
   state.comboTimer = countdown(state.comboTimer, dt);
-  if (state.comboTimer === 0) state.combo = 1;
+  if (state.comboTimer === 0) {
+    state.combo = 1;
+    if (comboWasActive) state.comboMilestonesHit = {};
+  }
   state.doubleTimer = countdown(state.doubleTimer, dt);
   state.magnetTimer = countdown(state.magnetTimer, dt);
   state.slowTimer = countdown(state.slowTimer, dt);
+  state.dashCooldown = countdown(state.dashCooldown, dt);
   data.invulnerable = countdown(data.invulnerable, dt);
+  if (input.dash && state.dashCooldown === 0) {
+    state.isDashing = true;
+    state.dashTimer = DASH.duration;
+    state.dashCooldown = DASH.cooldown;
+    data.invulnerable = Math.max(data.invulnerable, DASH.invulnerable);
+  }
 
   const difficulty = state.level - 1;
   const zone = currentZone(state, data);
@@ -323,8 +386,17 @@ function updatePlaying(state, data, input, dt) {
       else if (item.kind === 'double') state.doubleTimer = POWERUP.doubleDuration;
       else if (item.kind === 'magnet') state.magnetTimer = POWERUP.magnetDuration;
       else if (item.kind === 'slow') state.slowTimer = POWERUP.slowDuration;
+      else if (item.kind === 'life') state.lives = Math.min(POWERUP.lifeMax, state.lives + 1);
+      else if (item.kind === 'bomb') {
+        for (let j = state.comets.length - 1; j >= 0; j -= 1) {
+          if (!isCometVisible(data, state.comets[j])) continue;
+          state.comets.splice(j, 1);
+          state.score += POWERUP.bombPoints;
+        }
+      }
       const palette = currentZone(state, data).palette;
-      burst(state, data, item.x, item.y, palette[item.kind] || palette.cyan, 20);
+      const particleCount = item.kind === 'bomb' ? 56 : 20;
+      burst(state, data, item.x, item.y, palette[item.kind] || palette.cyan, particleCount);
       state.powerups.splice(i--, 1);
     } else if (item.y > data.height + item.r) {
       state.powerups.splice(i--, 1);
@@ -352,6 +424,12 @@ function updatePlaying(state, data, input, dt) {
       state.comboTimer = COMBO_SECONDS;
       state.score += (orb.kind === 'bonus' ? ORB.bonusPoints : ORB.starPoints)
         * state.combo * (state.doubleTimer > 0 ? 2 : 1);
+      const milestonePoints = COMBO_MILESTONES[state.combo];
+      if (milestonePoints && !state.comboMilestonesHit[state.combo]) {
+        state.score += milestonePoints;
+        state.comboMilestonesHit[state.combo] = true;
+        burst(state, data, orb.x, orb.y, defaults.PALETTE.gold, 24);
+      }
       data.collected += 1;
       state.totalOrbs = data.collected;
       state.level = 1 + Math.floor(data.collected / 25);
@@ -399,13 +477,11 @@ function updatePlaying(state, data, input, dt) {
     meta.age += dt;
     const oldX = comet.x;
     const oldY = comet.y;
-    const inside = (x, y) => x + comet.r >= 0 && x - comet.r <= data.width
-      && y + comet.r >= 0 && y - comet.r <= data.height;
-    meta.entered = meta.entered || inside(oldX, oldY);
+    meta.entered = meta.entered || isCometVisible(data, comet);
     if (comet.kind === 'homing') steerHoming(comet, player, cometDt);
     comet.x += comet.vx * cometDt;
     comet.y += comet.vy * cometDt;
-    const visible = inside(comet.x, comet.y);
+    const visible = isCometVisible(data, comet);
     meta.entered = meta.entered || visible;
     const exited = meta.entered && !visible;
     if (touches(player, oldPlayerX, oldPlayerY, comet, oldX, oldY)) {
@@ -426,6 +502,7 @@ function updatePlaying(state, data, input, dt) {
     } else if (exited || comet.x < -comet.r - 12 || comet.x > data.width + comet.r + 12
       || comet.y < -comet.r - 12 || comet.y > data.height + comet.r + 12) {
       state.comets.splice(i--, 1);
+      if (comet.kind === 'elite') dropEliteOrbs(state, data, comet);
     }
   }
   // New fragments start moving next step, so each entity gets exactly one update per step.
