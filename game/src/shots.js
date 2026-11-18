@@ -25,7 +25,11 @@ function makeBurst(cx, cy, count, colors) {
 
 /** Simple 2D autopilot used when stepping a live world forward before staging. */
 export function autopilot2D(state) {
-  const player = state.player || { x: 640, y: 520, r: 16 };
+  const player = state.player || {
+    x: CONFIG.width / 2,
+    y: 520,
+    r: CONFIG.player.r,
+  };
   let avoidX = 0;
   let avoidY = 0;
 
@@ -45,7 +49,13 @@ export function autopilot2D(state) {
 
   let seekX = 0;
   let seekY = 0;
-  if (Array.isArray(state.orbs) && state.orbs.length > 0) {
+  if (state.gate && state.gate.active) {
+    const dx = state.gate.x - player.x;
+    const dy = state.gate.y - player.y;
+    const d = Math.hypot(dx, dy) || 1;
+    seekX = dx / d;
+    seekY = dy / d;
+  } else if (Array.isArray(state.orbs) && state.orbs.length > 0) {
     let bestOrb = state.orbs[0];
     let bestScore = -Infinity;
     for (let i = 0; i < state.orbs.length; i += 1) {
@@ -112,151 +122,188 @@ export function stageShot(name, state, updateFn) {
   }
 
   if (shotName === 'play') {
+    const level = 2;
+    const gateX = 640;
+    const gateY = CONFIG.height - CONFIG.delivery.radius;
     Object.assign(state, {
       status: 'playing',
-      score: 1240,
-      lives: 3,
-      level: 3,
+      score: 1480,
+      lives: CONFIG.lives,
+      level,
+      zone: Math.min(3, level),
+      zoneChanged: 0,
+      deliverCount: CONFIG.delivery.target,
+      deliverTarget: CONFIG.delivery.target,
+      gate: { x: gateX, y: gateY, r: CONFIG.delivery.radius, active: true },
       combo: 4,
       comboTimer: 2.15,
       time: 34.6,
       shield: true,
       doubleTimer: 7.4,
-      player: { x: 575, y: 465, r: 16 },
+      magnetTimer: 5.8,
+      slowTimer: 0,
+      player: { x: 575, y: 475, r: CONFIG.player.r },
       orbs: [
-        { x: 645, y: 375, r: 16, kind: 'bonus' },
-        { x: 470, y: 350, r: 12, kind: 'star' },
-        { x: 750, y: 455, r: 12, kind: 'star' },
-        { x: 330, y: 240, r: 16, kind: 'bonus' },
-        { x: 890, y: 270, r: 12, kind: 'star' },
-        { x: 240, y: 525, r: 12, kind: 'star' },
-        { x: 1030, y: 485, r: 16, kind: 'bonus' },
-        { x: 520, y: 195, r: 12, kind: 'star' },
+        { x: 645, y: 385, r: CONFIG.orbs.bonusRadius, kind: 'bonus' },
+        { x: 475, y: 365, r: CONFIG.orbs.starRadius, kind: 'star' },
+        { x: 730, y: 445, r: CONFIG.orbs.starRadius, kind: 'star' },
+        { x: 330, y: 240, r: CONFIG.orbs.bonusRadius, kind: 'bonus' },
+        { x: 890, y: 270, r: CONFIG.orbs.starRadius, kind: 'star' },
+        { x: 240, y: 525, r: CONFIG.orbs.starRadius, kind: 'star' },
+        { x: 1030, y: 485, r: CONFIG.orbs.bonusRadius, kind: 'bonus' },
+        { x: 495, y: 195, r: CONFIG.orbs.starRadius, kind: 'star' },
       ],
       comets: [
-        { x: 415, y: 265, r: 22, vx: 95, vy: 245 },
-        { x: 825, y: 215, r: 20, vx: -115, vy: 230 },
-        { x: 265, y: 410, r: 19, vx: 140, vy: 195 },
-        { x: 990, y: 355, r: 24, vx: -85, vy: 260 },
+        { x: 405, y: 275, r: 22, vx: 115, vy: 225, kind: 'homing' },
+        { x: 835, y: 225, r: 24, vx: -115, vy: 230, kind: 'splitter' },
+        { x: 265, y: 410, r: 19, vx: 140, vy: 195, kind: 'normal' },
+        { x: 990, y: 355, r: 12, vx: -135, vy: 260, kind: 'mini' },
       ],
       powerups: [
-        { x: 375, y: 535, r: 15, kind: 'double' },
-        { x: 915, y: 540, r: 15, kind: 'shield' },
+        { x: 375, y: 535, r: CONFIG.powerups.r, kind: 'magnet' },
+        { x: 915, y: 540, r: CONFIG.powerups.r, kind: 'slow' },
       ],
       particles: [
-        ...makeBurst(505, 415, 22, ['#00f5ff', '#ffd700', '#ff2a85', '#ffffff']),
-        ...makeBurst(645, 375, 10, ['#ffd700', '#ff2a85']),
+        ...makeBurst(gateX, gateY, 18, ['#00ffaa', '#00f5ff', '#ffd166', '#ffffff']),
+        ...makeBurst(505, 425, 20, ['#00f5ff', '#c77dff', '#ff2a85', '#ffffff']),
       ],
     });
     return { screen: SCREEN_PLAY, best: 1850, state };
   }
 
   if (shotName === 'action') {
+    const level = 5;
+    const gateX = 430;
+    const gateY = CONFIG.height - CONFIG.delivery.radius;
     Object.assign(state, {
       status: 'playing',
-      score: 2680,
+      score: 3420,
       lives: 2,
-      level: 5,
+      level,
+      zone: Math.min(3, level),
+      zoneChanged: 1.85,
+      deliverCount: CONFIG.delivery.target,
+      deliverTarget: CONFIG.delivery.target,
+      gate: { x: gateX, y: gateY, r: CONFIG.delivery.radius, active: true },
       combo: 6,
-      comboTimer: 2.45,
+      comboTimer: 2.35,
       time: 68.4,
       shield: false,
       doubleTimer: 5.8,
-      player: { x: 720, y: 395, r: 16 },
+      magnetTimer: 4.2,
+      slowTimer: 3.6,
+      player: { x: 690, y: 420, r: CONFIG.player.r },
       orbs: [
-        { x: 785, y: 315, r: 16, kind: 'bonus' },
-        { x: 840, y: 380, r: 16, kind: 'bonus' },
-        { x: 620, y: 280, r: 12, kind: 'star' },
-        { x: 460, y: 440, r: 16, kind: 'bonus' },
-        { x: 310, y: 300, r: 12, kind: 'star' },
-        { x: 980, y: 250, r: 12, kind: 'star' },
-        { x: 540, y: 560, r: 12, kind: 'star' },
-        { x: 1080, y: 510, r: 16, kind: 'bonus' },
+        { x: 765, y: 335, r: CONFIG.orbs.bonusRadius, kind: 'bonus' },
+        { x: 825, y: 395, r: CONFIG.orbs.bonusRadius, kind: 'bonus' },
+        { x: 605, y: 325, r: CONFIG.orbs.starRadius, kind: 'star' },
+        { x: 460, y: 455, r: CONFIG.orbs.bonusRadius, kind: 'bonus' },
+        { x: 310, y: 300, r: CONFIG.orbs.starRadius, kind: 'star' },
+        { x: 980, y: 250, r: CONFIG.orbs.starRadius, kind: 'star' },
+        { x: 540, y: 560, r: CONFIG.orbs.starRadius, kind: 'star' },
+        { x: 1080, y: 510, r: CONFIG.orbs.bonusRadius, kind: 'bonus' },
       ],
       comets: [
-        { x: 635, y: 355, r: 24, vx: -135, vy: 285 },
-        { x: 830, y: 230, r: 22, vx: -90, vy: 310 },
-        { x: 510, y: 190, r: 20, vx: 150, vy: 270 },
-        { x: 960, y: 445, r: 25, vx: -180, vy: 220 },
-        { x: 290, y: 480, r: 21, vx: 165, vy: 240 },
+        { x: 830, y: 255, r: 22, vx: -135, vy: 215, kind: 'homing' },
+        { x: 370, y: 235, r: 25, vx: 125, vy: 245, kind: 'splitter' },
+        { x: 960, y: 445, r: 22, vx: -180, vy: 220, kind: 'normal' },
+        { x: 290, y: 480, r: 12, vx: 185, vy: 250, kind: 'mini' },
+        { x: 335, y: 515, r: 12, vx: 155, vy: 265, kind: 'mini' },
       ],
       powerups: [
-        { x: 585, y: 470, r: 15, kind: 'shield' },
+        { x: 585, y: 505, r: CONFIG.powerups.r, kind: 'shield' },
+        { x: 885, y: 495, r: CONFIG.powerups.r, kind: 'magnet' },
       ],
       particles: [
-        ...makeBurst(655, 455, 26, ['#ffd700', '#ff2a85', '#00f5ff', '#ffffff']),
-        ...makeBurst(785, 315, 14, ['#00f5ff', '#72efdd']),
+        ...makeBurst(gateX, gateY, 28, ['#00ffaa', '#ffd166', '#00f5ff', '#ffffff']),
+        ...makeBurst(655, 455, 24, ['#ffd700', '#ff2a85', '#c77dff', '#ffffff']),
       ],
     });
-    return { screen: SCREEN_PLAY, best: 2680, state };
+    return { screen: SCREEN_PLAY, best: 3420, state };
   }
 
   if (shotName === 'end') {
+    const level = 7;
     Object.assign(state, {
       status: 'over',
-      score: 3150,
+      score: 4280,
       lives: 0,
-      level: 6,
+      level,
+      zone: Math.min(3, level),
+      zoneChanged: 0,
+      deliverCount: 6,
+      deliverTarget: CONFIG.delivery.target,
+      gate: { x: 640, y: CONFIG.height - CONFIG.delivery.radius, r: CONFIG.delivery.radius, active: false },
       combo: 1,
       comboTimer: 0,
       time: 84.2,
       shield: false,
       doubleTimer: 0,
-      player: { x: 640, y: 510, r: 16 },
+      magnetTimer: 0,
+      slowTimer: 0,
+      player: { x: 640, y: 510, r: CONFIG.player.r },
       orbs: [
-        { x: 220, y: 260, r: 12, kind: 'star' },
-        { x: 1050, y: 310, r: 16, kind: 'bonus' },
-        { x: 280, y: 540, r: 16, kind: 'bonus' },
-        { x: 990, y: 550, r: 12, kind: 'star' },
+        { x: 220, y: 260, r: CONFIG.orbs.starRadius, kind: 'star' },
+        { x: 1050, y: 310, r: CONFIG.orbs.bonusRadius, kind: 'bonus' },
+        { x: 280, y: 540, r: CONFIG.orbs.bonusRadius, kind: 'bonus' },
+        { x: 990, y: 550, r: CONFIG.orbs.starRadius, kind: 'star' },
       ],
       comets: [
-        { x: 250, y: 185, r: 22, vx: 120, vy: 260 },
-        { x: 1030, y: 195, r: 24, vx: -130, vy: 250 },
-        { x: 195, y: 440, r: 20, vx: 145, vy: 220 },
-        { x: 1085, y: 460, r: 21, vx: -140, vy: 235 },
+        { x: 250, y: 185, r: 23, vx: 120, vy: 260, kind: 'splitter' },
+        { x: 1030, y: 195, r: 22, vx: -130, vy: 250, kind: 'homing' },
+        { x: 195, y: 440, r: 20, vx: 145, vy: 220, kind: 'normal' },
+        { x: 1085, y: 460, r: 12, vx: -140, vy: 235, kind: 'mini' },
       ],
       powerups: [
-        { x: 210, y: 345, r: 15, kind: 'shield' },
+        { x: 210, y: 345, r: CONFIG.powerups.r, kind: 'slow' },
       ],
       particles: makeBurst(640, 510, 32, ['#ff2a6d', '#ff7b54', '#ffd166', '#ffffff']),
     });
-    return { screen: SCREEN_OVER, best: 3420, state };
+    return { screen: SCREEN_OVER, best: 4650, state };
   }
 
   // Default: ?shot=start (title screen)
+  const level = 1;
   Object.assign(state, {
     status: 'title',
     score: 0,
     lives: CONFIG.lives,
-    level: 1,
+    level,
+    zone: Math.min(3, level),
+    zoneChanged: 0,
+    deliverCount: 0,
+    deliverTarget: CONFIG.delivery.target,
+    gate: { x: 640, y: CONFIG.height - CONFIG.delivery.radius, r: CONFIG.delivery.radius, active: false },
     combo: 1,
     comboTimer: 0,
     time: 6.4,
     shield: true,
     doubleTimer: 0,
-    player: { x: 640, y: 635, r: 16 },
+    magnetTimer: 0,
+    slowTimer: 0,
+    player: { x: 640, y: 635, r: CONFIG.player.r },
     orbs: [
-      { x: 145, y: 185, r: 16, kind: 'bonus' },
-      { x: 1135, y: 195, r: 16, kind: 'bonus' },
-      { x: 125, y: 380, r: 12, kind: 'star' },
-      { x: 1155, y: 390, r: 12, kind: 'star' },
-      { x: 180, y: 565, r: 12, kind: 'star' },
-      { x: 1100, y: 560, r: 16, kind: 'bonus' },
+      { x: 145, y: 185, r: CONFIG.orbs.bonusRadius, kind: 'bonus' },
+      { x: 1135, y: 195, r: CONFIG.orbs.bonusRadius, kind: 'bonus' },
+      { x: 125, y: 380, r: CONFIG.orbs.starRadius, kind: 'star' },
+      { x: 1155, y: 390, r: CONFIG.orbs.starRadius, kind: 'star' },
+      { x: 180, y: 565, r: CONFIG.orbs.starRadius, kind: 'star' },
+      { x: 1100, y: 560, r: CONFIG.orbs.bonusRadius, kind: 'bonus' },
     ],
     comets: [
-      { x: 165, y: 110, r: 21, vx: 95, vy: 210 },
-      { x: 1115, y: 120, r: 22, vx: -105, vy: 215 },
+      { x: 165, y: 110, r: 22, vx: 95, vy: 210, kind: 'splitter' },
+      { x: 1115, y: 120, r: 22, vx: -105, vy: 215, kind: 'homing' },
     ],
     powerups: [
-      { x: 150, y: 475, r: 15, kind: 'shield' },
-      { x: 1130, y: 475, r: 15, kind: 'double' },
+      { x: 150, y: 475, r: CONFIG.powerups.r, kind: 'magnet' },
+      { x: 1130, y: 475, r: CONFIG.powerups.r, kind: 'slow' },
     ],
     particles: [
       ...makeBurst(145, 185, 12, ['#ffd700', '#00f5ff']),
       ...makeBurst(1135, 195, 12, ['#ff2a85', '#00f5ff']),
     ],
   });
-  return { screen: SCREEN_TITLE, best: 2450, state };
+  return { screen: SCREEN_TITLE, best: 3420, state };
 }
 
 export default stageShot;

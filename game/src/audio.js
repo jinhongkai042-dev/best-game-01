@@ -122,8 +122,81 @@ export function playHit(shieldAbsorbed = false) {
   }
 }
 
-/** Shimmering synth arpeggio when grabbing a shield or double-score power-up. */
+/** Magnetic attraction hum + rising harmonic sweep when grabbing a magnet power-up. */
+export function playMagnet() {
+  const audioCtx = getContext();
+  if (!audioCtx) return;
+  try {
+    const now = audioCtx.currentTime;
+    const notes = [330, 440, 659.25, 880];
+    notes.forEach((freq, idx) => {
+      const start = now + idx * 0.04;
+      const osc = audioCtx.createOscillator();
+      const sub = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = 'sine';
+      sub.type = 'triangle';
+      osc.frequency.setValueAtTime(freq * 0.92, start);
+      osc.frequency.exponentialRampToValueAtTime(freq * 1.12, start + 0.18);
+      sub.frequency.setValueAtTime(freq * 0.5, start);
+      sub.frequency.exponentialRampToValueAtTime(freq * 0.56, start + 0.18);
+
+      gain.gain.setValueAtTime(0.001, start);
+      gain.gain.linearRampToValueAtTime(0.14, start + 0.015);
+      gain.gain.exponentialRampToValueAtTime(0.0008, start + 0.2);
+
+      osc.connect(gain);
+      sub.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start(start);
+      sub.start(start);
+      osc.stop(start + 0.21);
+      sub.stop(start + 0.21);
+    });
+  } catch {
+    // Ignore audio errors.
+  }
+}
+
+/** Crystalline time-dilation sweep when grabbing a chrono-slow power-up. */
+export function playSlow() {
+  const audioCtx = getContext();
+  if (!audioCtx) return;
+  try {
+    const now = audioCtx.currentTime;
+    const notes = [1046.5, 783.99, 659.25, 523.25];
+    notes.forEach((freq, idx) => {
+      const start = now + idx * 0.055;
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, start);
+      osc.frequency.exponentialRampToValueAtTime(freq * 0.88, start + 0.22);
+
+      gain.gain.setValueAtTime(0.001, start);
+      gain.gain.linearRampToValueAtTime(0.15, start + 0.012);
+      gain.gain.exponentialRampToValueAtTime(0.0008, start + 0.24);
+
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start(start);
+      osc.stop(start + 0.25);
+    });
+  } catch {
+    // Ignore audio errors.
+  }
+}
+
+/** Shimmering synth arpeggio when grabbing a shield, double, magnet, or slow power-up. */
 export function playPowerup(kind = 'shield') {
+  if (kind === 'magnet') {
+    playMagnet();
+    return;
+  }
+  if (kind === 'slow') {
+    playSlow();
+    return;
+  }
   const audioCtx = getContext();
   if (!audioCtx) return;
   try {
@@ -142,6 +215,93 @@ export function playPowerup(kind = 'shield') {
       gain.connect(audioCtx.destination);
       osc.start(start);
       osc.stop(start + 0.17);
+    });
+  } catch {
+    // Ignore audio errors.
+  }
+}
+
+/** Euphoric portal chord & warp chime on completing a stardust gate delivery. */
+export function playDelivery() {
+  const audioCtx = getContext();
+  if (!audioCtx) return;
+  try {
+    const now = audioCtx.currentTime;
+    const notes = [523.25, 659.25, 783.99, 987.77, 1318.51, 1567.98];
+    notes.forEach((freq, idx) => {
+      const start = now + idx * 0.042;
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = idx % 2 === 0 ? 'triangle' : 'sine';
+      osc.frequency.setValueAtTime(freq, start);
+      osc.frequency.exponentialRampToValueAtTime(freq * 1.04, start + 0.28);
+
+      gain.gain.setValueAtTime(0.001, start);
+      gain.gain.linearRampToValueAtTime(0.16, start + 0.012);
+      gain.gain.exponentialRampToValueAtTime(0.0008, start + 0.32);
+
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start(start);
+      osc.stop(start + 0.33);
+    });
+
+    // Warm sub-bass portal resonance
+    const sub = audioCtx.createOscillator();
+    const subGain = audioCtx.createGain();
+    sub.type = 'sine';
+    sub.frequency.setValueAtTime(130.81, now);
+    sub.frequency.exponentialRampToValueAtTime(261.63, now + 0.35);
+    subGain.gain.setValueAtTime(0.001, now);
+    subGain.gain.linearRampToValueAtTime(0.2, now + 0.02);
+    subGain.gain.exponentialRampToValueAtTime(0.0008, now + 0.38);
+    sub.connect(subGain);
+    subGain.connect(audioCtx.destination);
+    sub.start(now);
+    sub.stop(now + 0.39);
+  } catch {
+    // Ignore audio errors.
+  }
+}
+
+/** Deep hyper-jump swell and sector fanfare when entering a new cosmic zone. */
+export function playZoneChange() {
+  const audioCtx = getContext();
+  if (!audioCtx) return;
+  try {
+    const now = audioCtx.currentTime;
+    const swell = audioCtx.createOscillator();
+    const swellFilter = audioCtx.createBiquadFilter();
+    const swellGain = audioCtx.createGain();
+    swell.type = 'sawtooth';
+    swell.frequency.setValueAtTime(110, now);
+    swell.frequency.exponentialRampToValueAtTime(220, now + 0.45);
+    swellFilter.type = 'lowpass';
+    swellFilter.frequency.setValueAtTime(320, now);
+    swellFilter.frequency.exponentialRampToValueAtTime(1800, now + 0.4);
+    swellGain.gain.setValueAtTime(0.001, now);
+    swellGain.gain.linearRampToValueAtTime(0.14, now + 0.08);
+    swellGain.gain.exponentialRampToValueAtTime(0.0008, now + 0.48);
+    swell.connect(swellFilter);
+    swellFilter.connect(swellGain);
+    swellGain.connect(audioCtx.destination);
+    swell.start(now);
+    swell.stop(now + 0.5);
+
+    const chord = [440, 659.25, 880, 1108.73];
+    chord.forEach((freq, idx) => {
+      const start = now + 0.06 + idx * 0.055;
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(freq, start);
+      gain.gain.setValueAtTime(0.001, start);
+      gain.gain.linearRampToValueAtTime(0.14, start + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0008, start + 0.36);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start(start);
+      osc.stop(start + 0.38);
     });
   } catch {
     // Ignore audio errors.
@@ -240,6 +400,10 @@ export function createAudio() {
     collect: playCollect,
     hit: playHit,
     powerup: playPowerup,
+    magnet: playMagnet,
+    slow: playSlow,
+    delivery: playDelivery,
+    zoneChange: playZoneChange,
     levelUp: playLevelUp,
     gameOver: playGameOver,
     start: playStart,

@@ -98,6 +98,12 @@ function runGame() {
     const prevLevel = state.level;
     const prevShield = Boolean(state.shield);
     const prevDouble = state.doubleTimer || 0;
+    const prevMagnet = state.magnetTimer || 0;
+    const prevSlow = state.slowTimer || 0;
+    const prevGateActive = Boolean(state.gate && state.gate.active);
+    const prevDeliverCount = state.deliverCount || 0;
+    const prevZone = state.zone || 1;
+    const prevZoneChanged = state.zoneChanged || 0;
 
     updateWorld(state, snap, dt);
 
@@ -107,18 +113,44 @@ function runGame() {
     }
 
     if (state.status === 'playing') {
-      if (state.score > prevScore) {
+      const gateNowActive = Boolean(state.gate && state.gate.active);
+      const delivered =
+        (prevGateActive && !gateNowActive && state.score > prevScore) ||
+        (prevDeliverCount > 0 && (state.deliverCount || 0) === 0 && state.score > prevScore);
+
+      if (delivered) {
+        audio.delivery();
+        announce('Gate delivery complete!');
+      } else if (state.score > prevScore) {
         const delta = state.score - prevScore;
         const isBonus = delta >= 50 * Math.max(1, state.combo);
         audio.collect(state.combo, isBonus);
       }
-      if ((!prevShield && state.shield) || state.doubleTimer > prevDouble + 1) {
-        audio.powerup(state.doubleTimer > prevDouble + 1 ? 'double' : 'shield');
+
+      if (!prevShield && state.shield) {
+        audio.powerup('shield');
+      } else if ((state.doubleTimer || 0) > prevDouble + 0.5) {
+        audio.powerup('double');
       }
-      if (state.level > prevLevel) {
+      if ((state.magnetTimer || 0) > prevMagnet + 0.5) {
+        audio.magnet();
+      }
+      if ((state.slowTimer || 0) > prevSlow + 0.5) {
+        audio.slow();
+      }
+
+      const zoneChangedNow =
+        (state.zone && state.zone !== prevZone) ||
+        ((state.zoneChanged || 0) > prevZoneChanged + 0.5);
+      if (zoneChangedNow) {
+        audio.zoneChange();
+        const zInfo = CONFIG.zones && CONFIG.zones[state.zone || 1];
+        announce(`Entered Zone ${state.zone || 1}${zInfo ? `: ${zInfo.name}` : ''}.`);
+      } else if (state.level > prevLevel) {
         audio.levelUp();
         announce(`Level ${state.level}.`);
       }
+
       if (state.lives < prevLives) {
         audio.hit(false);
         announce(`${state.lives} ${state.lives === 1 ? 'life' : 'lives'} remaining.`);
