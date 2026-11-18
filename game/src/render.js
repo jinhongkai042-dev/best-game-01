@@ -56,6 +56,14 @@ function getDashCooldownMax(observedMax) {
   return observedMax > 0 ? observedMax : 2.5;
 }
 
+function getBossConfig() {
+  const b = CONFIG && (CONFIG.boss || CONFIG.BOSS);
+  return {
+    r: b && Number.isFinite(b.r) && b.r > 0 ? b.r : 42,
+    hp: b && Number.isFinite(b.hp) && b.hp > 0 ? Math.floor(b.hp) : 3,
+  };
+}
+
 function resolveBestScore(state, argBest) {
   if (state && Number.isFinite(state.best)) {
     return Math.max(0, Math.floor(state.best));
@@ -1005,6 +1013,172 @@ function drawComets(ctx, comets, time) {
   }
 }
 
+function drawBoss(ctx, boss, time) {
+  if (!boss || !Number.isFinite(boss.x) || !Number.isFinite(boss.y)) return;
+
+  const bossCfg = getBossConfig();
+  const maxHp = Math.max(1, bossCfg.hp);
+  const curHp = Math.max(0, Math.min(maxHp, Math.ceil(Number.isFinite(boss.hp) ? boss.hp : maxHp)));
+  const baseR = Number.isFinite(boss.r) && boss.r > 0 ? boss.r : bossCfg.r;
+  const bossColor = (PALETTE && PALETTE.boss) || '#ff1744';
+  const bossGlow = (PALETTE && PALETTE.bossGlow) || '#ff5e3a';
+
+  const pulse = 1 + 0.08 * Math.sin(time * 5.2);
+  const r = baseR * pulse;
+  const vx = Number.isFinite(boss.vx) ? boss.vx : 0;
+  const vy = Number.isFinite(boss.vy) ? boss.vy : 180;
+  const angle = vx === 0 && vy === 0 ? Math.PI / 2 : Math.atan2(vy, vx);
+  const tailLen = r * 4.2;
+
+  ctx.save();
+  ctx.translate(boss.x, boss.y);
+  ctx.rotate(angle);
+
+  // Blazing crimson-orange plasma tail wake
+  const tailGrad = ctx.createLinearGradient(0, 0, -tailLen, 0);
+  tailGrad.addColorStop(0, 'rgba(255, 23, 68, 0.92)');
+  tailGrad.addColorStop(0.4, 'rgba(255, 94, 58, 0.56)');
+  tailGrad.addColorStop(1, 'rgba(36, 4, 12, 0)');
+  ctx.fillStyle = tailGrad;
+  ctx.beginPath();
+  ctx.moveTo(0, -r * 0.96);
+  ctx.quadraticCurveTo(-tailLen * 0.5, -r * 0.6 + Math.sin(time * 9) * 5, -tailLen, 0);
+  ctx.quadraticCurveTo(-tailLen * 0.5, r * 0.6 + Math.cos(time * 9) * 5, 0, r * 0.96);
+  ctx.closePath();
+  ctx.fill();
+
+  // Inner molten orange-white core jet
+  const innerTail = ctx.createLinearGradient(0, 0, -tailLen * 0.62, 0);
+  innerTail.addColorStop(0, 'rgba(255, 235, 210, 0.92)');
+  innerTail.addColorStop(0.5, 'rgba(255, 94, 58, 0.62)');
+  innerTail.addColorStop(1, 'rgba(255, 23, 68, 0)');
+  ctx.fillStyle = innerTail;
+  ctx.beginPath();
+  ctx.moveTo(0, -r * 0.44);
+  ctx.lineTo(-tailLen * 0.62, 0);
+  ctx.lineTo(0, r * 0.44);
+  ctx.closePath();
+  ctx.fill();
+
+  // Massive pulsing crimson-orange danger aura
+  const auraR = r * 2.65;
+  const aura = ctx.createRadialGradient(0, 0, r * 0.3, 0, 0, auraR);
+  aura.addColorStop(0, 'rgba(255, 23, 68, 0.62)');
+  aura.addColorStop(0.52, 'rgba(255, 94, 58, 0.28)');
+  aura.addColorStop(1, 'rgba(255, 23, 68, 0)');
+  ctx.fillStyle = aura;
+  ctx.beginPath();
+  ctx.arc(0, 0, auraR, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Pulsing outer boss threat ring & counter-rotating arcs
+  ctx.save();
+  ctx.shadowColor = bossGlow;
+  ctx.shadowBlur = 18;
+  ctx.strokeStyle = bossColor;
+  ctx.lineWidth = 3;
+  ctx.globalAlpha = 0.72 + 0.25 * Math.sin(time * 6.8);
+  ctx.beginPath();
+  ctx.arc(0, 0, r * 1.32, 0, Math.PI * 2);
+  ctx.stroke();
+
+  ctx.strokeStyle = bossGlow;
+  ctx.lineWidth = 2.2;
+  for (let a = 0; a < 4; a += 1) {
+    const startA = -time * 2.2 + (a * Math.PI) / 2;
+    ctx.beginPath();
+    ctx.arc(0, 0, r * 1.54, startA, startA + Math.PI * 0.28);
+    ctx.stroke();
+  }
+  ctx.restore();
+
+  // Spiked volcanic-crimson boss comet body
+  ctx.rotate(time * 0.95);
+  const verts = 14;
+  ctx.beginPath();
+  for (let v = 0; v < verts; v += 1) {
+    const a = (v / verts) * Math.PI * 2;
+    const jag = v % 2 === 0 ? 1.15 : 0.8 + 0.05 * Math.sin(v * 2.3);
+    const px = Math.cos(a) * r * jag;
+    const py = Math.sin(a) * r * jag;
+    if (v === 0) ctx.moveTo(px, py);
+    else ctx.lineTo(px, py);
+  }
+  ctx.closePath();
+  ctx.fillStyle = '#26050d';
+  ctx.fill();
+  ctx.lineWidth = 3.8;
+  ctx.strokeStyle = bossColor;
+  ctx.stroke();
+
+  // Glowing molten fissures & pulsing core
+  ctx.strokeStyle = bossGlow;
+  ctx.lineWidth = 2.2;
+  for (let f = 0; f < 5; f += 1) {
+    const fa = (f * Math.PI * 2) / 5 + 0.2;
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(Math.cos(fa) * r * 0.76, Math.sin(fa) * r * 0.76);
+    ctx.stroke();
+  }
+
+  ctx.shadowColor = bossColor;
+  ctx.shadowBlur = 14;
+  ctx.fillStyle = '#ffe5e0';
+  ctx.beginPath();
+  ctx.arc(0, 0, r * 0.3, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.restore();
+
+  // HP pips above the boss (in unrotated screen space)
+  ctx.save();
+  const pipR = 5.5;
+  const pipSpacing = 18;
+  const pipsW = (maxHp - 1) * pipSpacing;
+  const pipY = Math.max(24, boss.y - baseR * 1.55 - 12);
+  const pillW = Math.max(66, pipsW + 32);
+  const pillH = 22;
+
+  roundedRect(ctx, boss.x - pillW / 2, pipY - pillH / 2, pillW, pillH, 11);
+  ctx.fillStyle = 'rgba(14, 4, 10, 0.84)';
+  ctx.fill();
+  ctx.lineWidth = 1.4;
+  ctx.strokeStyle = bossColor;
+  ctx.stroke();
+
+  const startX = boss.x - pipsW / 2;
+  for (let i = 0; i < maxHp; i += 1) {
+    const px = startX + i * pipSpacing;
+    const filled = i < curHp;
+    ctx.beginPath();
+    ctx.arc(px, pipY, pipR, 0, Math.PI * 2);
+    if (filled) {
+      ctx.save();
+      ctx.shadowColor = bossGlow;
+      ctx.shadowBlur = 10;
+      ctx.fillStyle = bossColor;
+      ctx.fill();
+      ctx.lineWidth = 1.4;
+      ctx.strokeStyle = '#ffd6dc';
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
+      ctx.beginPath();
+      ctx.arc(px - pipR * 0.32, pipY - pipR * 0.32, pipR * 0.28, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    } else {
+      ctx.fillStyle = 'rgba(255, 23, 68, 0.14)';
+      ctx.fill();
+      ctx.lineWidth = 1.2;
+      ctx.strokeStyle = 'rgba(255, 94, 58, 0.42)';
+      ctx.stroke();
+    }
+  }
+  ctx.restore();
+}
+
 function drawParticles(ctx, particles, extraBursts) {
   ctx.save();
   ctx.globalCompositeOperation = 'lighter';
@@ -1499,6 +1673,90 @@ function drawZoneBanner(ctx, state) {
   ctx.restore();
 }
 
+function drawStormWarningBanner(ctx, state, time) {
+  if (!state || !state.stormWarning) return;
+  const stormColor = (PALETTE && PALETTE.storm) || '#ff9e00';
+  const pulse = 0.86 + 0.14 * Math.sin((time || 0) * 10);
+  const cx = WIDTH / 2;
+  const cy = (state.zoneChanged || 0) > 0 ? 254 : 178;
+
+  ctx.save();
+  ctx.globalAlpha = pulse;
+
+  const w = 460;
+  const h = 64;
+  roundedRect(ctx, cx - w / 2, cy - h / 2, w, h, 14);
+  ctx.fillStyle = 'rgba(6, 10, 28, 0.88)';
+  ctx.fill();
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = stormColor;
+  ctx.stroke();
+
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.font = `bold 22px ${FONT}`;
+  ctx.fillStyle = stormColor;
+  ctx.shadowColor = stormColor;
+  ctx.shadowBlur = 14;
+  ctx.fillText('COMET STORM INCOMING', cx, cy - 8);
+
+  ctx.shadowBlur = 0;
+  ctx.font = `bold 11px ${FONT}`;
+  ctx.fillStyle = PALETTE.text;
+  ctx.fillText('BRACE FOR HIGH-DENSITY BARRAGE', cx, cy + 16);
+
+  ctx.restore();
+}
+
+function drawStormEdgeGlow(ctx, state, time) {
+  if (!state || !state.stormActive) return;
+  const stormGlow = (PALETTE && PALETTE.stormGlow) || '#ff2a6d';
+  const pulse = 0.55 + 0.45 * Math.sin((time || 0) * 7.5);
+  const edgeDepth = 76;
+
+  ctx.save();
+
+  // Top edge glow
+  const topGrad = ctx.createLinearGradient(0, 0, 0, edgeDepth);
+  topGrad.addColorStop(0, `rgba(255, 62, 42, ${(0.34 * pulse).toFixed(3)})`);
+  topGrad.addColorStop(0.5, `rgba(255, 130, 24, ${(0.14 * pulse).toFixed(3)})`);
+  topGrad.addColorStop(1, 'rgba(255, 158, 0, 0)');
+  ctx.fillStyle = topGrad;
+  ctx.fillRect(0, 0, WIDTH, edgeDepth);
+
+  // Bottom edge glow
+  const botGrad = ctx.createLinearGradient(0, HEIGHT, 0, HEIGHT - edgeDepth);
+  botGrad.addColorStop(0, `rgba(255, 62, 42, ${(0.34 * pulse).toFixed(3)})`);
+  botGrad.addColorStop(0.5, `rgba(255, 130, 24, ${(0.14 * pulse).toFixed(3)})`);
+  botGrad.addColorStop(1, 'rgba(255, 158, 0, 0)');
+  ctx.fillStyle = botGrad;
+  ctx.fillRect(0, HEIGHT - edgeDepth, WIDTH, edgeDepth);
+
+  // Left edge glow
+  const leftGrad = ctx.createLinearGradient(0, 0, edgeDepth, 0);
+  leftGrad.addColorStop(0, `rgba(255, 62, 42, ${(0.32 * pulse).toFixed(3)})`);
+  leftGrad.addColorStop(0.5, `rgba(255, 130, 24, ${(0.12 * pulse).toFixed(3)})`);
+  leftGrad.addColorStop(1, 'rgba(255, 158, 0, 0)');
+  ctx.fillStyle = leftGrad;
+  ctx.fillRect(0, 0, edgeDepth, HEIGHT);
+
+  // Right edge glow
+  const rightGrad = ctx.createLinearGradient(WIDTH, 0, WIDTH - edgeDepth, 0);
+  rightGrad.addColorStop(0, `rgba(255, 62, 42, ${(0.32 * pulse).toFixed(3)})`);
+  rightGrad.addColorStop(0.5, `rgba(255, 130, 24, ${(0.12 * pulse).toFixed(3)})`);
+  rightGrad.addColorStop(1, 'rgba(255, 158, 0, 0)');
+  ctx.fillStyle = rightGrad;
+  ctx.fillRect(WIDTH - edgeDepth, 0, edgeDepth, HEIGHT);
+
+  // Pulsing perimeter border highlight
+  ctx.strokeStyle = stormGlow;
+  ctx.globalAlpha = 0.25 + 0.3 * pulse;
+  ctx.lineWidth = 4;
+  ctx.strokeRect(2, 2, WIDTH - 4, HEIGHT - 4);
+
+  ctx.restore();
+}
+
 function drawHud(ctx, state, dashCooldownMax = 2.5) {
   const score = Math.max(0, Math.floor(state.score || 0));
   const lives = Math.max(0, Math.floor(state.lives ?? LIVES));
@@ -1721,6 +1979,40 @@ function drawHud(ctx, state, dashCooldownMax = 2.5) {
     ctx.fillText(isDashing ? 'GO!' : `${dashCooldown.toFixed(1)}s`, rightX + rightW - 10, dashY + dashH / 2 + 0.5);
   }
 
+  // Active Comet Storm indicator pill below top-left score panel
+  if (state.stormActive) {
+    const stormColor = (PALETTE && PALETTE.storm) || '#ff9e00';
+    const stormGlow = (PALETTE && PALETTE.stormGlow) || '#ff2a6d';
+    const stormPulse = 0.78 + 0.22 * Math.sin((state.time || 0) * 9);
+    const sx = 22;
+    const sy = 98;
+    const sw = 158;
+    const sh = 24;
+
+    ctx.save();
+    ctx.globalAlpha = stormPulse;
+    roundedRect(ctx, sx, sy, sw, sh, 12);
+    ctx.fillStyle = 'rgba(42, 10, 14, 0.85)';
+    ctx.fill();
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = stormGlow;
+    ctx.stroke();
+
+    ctx.shadowColor = stormColor;
+    ctx.shadowBlur = 8;
+    ctx.fillStyle = stormColor;
+    ctx.beginPath();
+    ctx.arc(sx + 16, sy + sh / 2, 4, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.font = `bold 11px ${FONT}`;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = stormColor;
+    ctx.fillText('COMET STORM', sx + 28, sy + sh / 2 + 0.5);
+    ctx.restore();
+  }
+
   ctx.restore();
 }
 
@@ -1739,10 +2031,10 @@ function drawTitleOverlay(ctx, state, bestScore) {
   ctx.fillRect(0, 0, WIDTH, HEIGHT);
 
   // Holographic Command Card
-  const cardW = 760;
-  const cardH = 470;
+  const cardW = 780;
+  const cardH = 516;
   const cardX = cx - cardW / 2;
-  const cardY = cy - cardH / 2;
+  const cardY = 74;
 
   ctx.shadowColor = 'rgba(0, 229, 255, 0.35)';
   ctx.shadowBlur = 28;
@@ -1763,36 +2055,52 @@ function drawTitleOverlay(ctx, state, bestScore) {
 
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.font = `bold 14px ${FONT}`;
+  ctx.font = `bold 13px ${FONT}`;
   ctx.fillStyle = PALETTE.cyan;
-  ctx.fillText('✦  NEON STARFIELD EXPRESS  ·  WARP GATE COURIER  ✦', cx, cardY + 48);
+  ctx.fillText('✦  NEON STARFIELD EXPRESS  ·  WARP GATE COURIER  ✦', cx, cardY + 36);
 
   // Main Game Title with neon glow
   ctx.save();
-  ctx.font = `900 64px ${FONT}`;
+  ctx.font = `900 60px ${FONT}`;
   ctx.shadowColor = '#00f5ff';
   ctx.shadowBlur = 22;
-  const titleGrad = ctx.createLinearGradient(cx - 280, cardY + 80, cx + 280, cardY + 135);
+  const titleGrad = ctx.createLinearGradient(cx - 280, cardY + 60, cx + 280, cardY + 115);
   titleGrad.addColorStop(0, '#00f5ff');
   titleGrad.addColorStop(0.5, '#ffffff');
   titleGrad.addColorStop(1, '#ff2a85');
   ctx.fillStyle = titleGrad;
-  ctx.fillText('STARDUST COURIER', cx, cardY + 106);
+  ctx.fillText('STARDUST COURIER', cx, cardY + 86);
   ctx.restore();
 
-  ctx.font = `18px ${FONT}`;
+  // Compact HOW TO PLAY block under the title
+  const innerW = 708;
+  const innerX = cx - innerW / 2;
+  const howY = cardY + 128;
+  const howH = 82;
+  roundedRect(ctx, innerX, howY, innerW, howH, 12);
+  ctx.fillStyle = 'rgba(12, 20, 48, 0.88)';
+  ctx.fill();
+  ctx.lineWidth = 1.4;
+  ctx.strokeStyle = 'rgba(0, 229, 255, 0.42)';
+  ctx.stroke();
+
+  ctx.font = `bold 12px ${FONT}`;
+  ctx.fillStyle = PALETTE.cyan;
+  ctx.fillText('HOW TO PLAY', cx, howY + 17);
+
+  ctx.font = `bold 14px ${FONT}`;
+  ctx.fillStyle = PALETTE.text;
+  ctx.fillText('Move: Arrow Keys / WASD (or Mouse)  ·  Space: Dash', cx, howY + 41);
+
+  ctx.font = `14px ${FONT}`;
   ctx.fillStyle = '#c4d7f2';
-  ctx.fillText(
-    'Collect 10 star-orbs to open the Warp Gate, deliver cargo across 3 cosmic zones!',
-    cx,
-    cardY + 158,
-  );
+  ctx.fillText('Collect orbs, deliver 10 orbs to the gate, and avoid comets', cx, howY + 63);
 
   // Feature Legend Cards (Orbs & Gate, Power-ups, Comets)
-  const boxY = cardY + 190;
-  const boxH = 118;
-  const boxW = 216;
-  const gap = 22;
+  const boxY = cardY + 224;
+  const boxH = 100;
+  const boxW = 222;
+  const gap = 21;
   const startX = cx - (boxW * 3 + gap * 2) / 2;
 
   const cards = [
@@ -1811,7 +2119,7 @@ function drawTitleOverlay(ctx, state, bestScore) {
     {
       title: 'VOID HAZARDS',
       sub1: 'Splitter & Homing Comets',
-      sub2: 'Elite Comets · Space Dash',
+      sub2: 'Bosses · Comet Storms',
       color: PALETTE.danger,
     },
   ];
@@ -1825,30 +2133,90 @@ function drawTitleOverlay(ctx, state, bestScore) {
     ctx.strokeStyle = cards[i].color;
     ctx.stroke();
 
-    ctx.font = `bold 14px ${FONT}`;
+    ctx.font = `bold 13px ${FONT}`;
     ctx.fillStyle = cards[i].color;
-    ctx.fillText(cards[i].title, bx + boxW / 2, boxY + 30);
+    ctx.fillText(cards[i].title, bx + boxW / 2, boxY + 25);
 
-    ctx.font = `14px ${FONT}`;
+    ctx.font = `13px ${FONT}`;
     ctx.fillStyle = PALETTE.text;
-    ctx.fillText(cards[i].sub1, bx + boxW / 2, boxY + 62);
+    ctx.fillText(cards[i].sub1, bx + boxW / 2, boxY + 53);
     ctx.fillStyle = PALETTE.muted;
-    ctx.fillText(cards[i].sub2, bx + boxW / 2, boxY + 88);
+    ctx.fillText(cards[i].sub2, bx + boxW / 2, boxY + 77);
   }
 
-  // Controls & Best Score (reads state.best; shows nothing if undefined)
+  // One-line Power-Up Legend bar (shield / double / magnet / slow / life / bomb)
+  const legY = cardY + 338;
+  const legH = 34;
+  roundedRect(ctx, innerX, legY, innerW, legH, 10);
+  ctx.fillStyle = 'rgba(12, 20, 48, 0.85)';
+  ctx.fill();
+  ctx.lineWidth = 1.2;
+  ctx.strokeStyle = 'rgba(114, 239, 221, 0.34)';
+  ctx.stroke();
+
+  const legendItems = [
+    { label: 'Shield', color: PALETTE.shield || '#00ffaa' },
+    { label: 'Double', color: PALETTE.double || '#ffd166' },
+    { label: 'Magnet', color: PALETTE.magnet || '#c77dff' },
+    { label: 'Slow', color: PALETTE.slow || '#72efdd' },
+    { label: 'Life', color: PALETTE.life || PALETTE.heartFull || '#ff5d8f' },
+    { label: 'Bomb', color: PALETTE.bomb || '#ff6b35' },
+  ];
+  ctx.font = `bold 12px ${FONT}`;
+  const prefixText = 'POWER-UPS:';
+  const sepText = '  /  ';
+  const dotDia = 8;
+  const dotGap = 5;
+  const prefixW = ctx.measureText(prefixText).width;
+  const sepW = ctx.measureText(sepText).width;
+  let totalLegW = prefixW + 14;
+  const itemWidths = legendItems.map((it) => ctx.measureText(it.label).width);
+  for (let i = 0; i < legendItems.length; i += 1) {
+    totalLegW += dotDia + dotGap + itemWidths[i];
+    if (i < legendItems.length - 1) totalLegW += sepW;
+  }
+
+  let curX = cx - totalLegW / 2;
+  const legMidY = legY + legH / 2 + 0.5;
+  ctx.textAlign = 'left';
+  ctx.fillStyle = PALETTE.muted;
+  ctx.fillText(prefixText, curX, legMidY);
+  curX += prefixW + 14;
+
+  for (let i = 0; i < legendItems.length; i += 1) {
+    const it = legendItems[i];
+    ctx.fillStyle = it.color;
+    ctx.beginPath();
+    ctx.arc(curX + dotDia / 2, legMidY - 0.5, dotDia / 2, 0, Math.PI * 2);
+    ctx.fill();
+    curX += dotDia + dotGap;
+
+    ctx.fillStyle = it.color;
+    ctx.fillText(it.label, curX, legMidY);
+    curX += itemWidths[i];
+
+    if (i < legendItems.length - 1) {
+      ctx.fillStyle = 'rgba(148, 169, 201, 0.55)';
+      ctx.fillText(sepText, curX, legMidY);
+      curX += sepW;
+    }
+  }
+  ctx.textAlign = 'center';
+
+  // Best Score (reads state.best; shows nothing if undefined)
   const resolvedBest = resolveBestScore(state, bestScore);
-  ctx.font = `bold 15px ${FONT}`;
-  ctx.fillStyle = PALETTE.gold;
-  const bestText = resolvedBest !== null ? `   ·   BEST  ${resolvedBest.toLocaleString('en-US')}` : '';
-  ctx.fillText(`CONTROLS:  WASD / ARROWS · MOUSE · SPACE DASH${bestText}`, cx, cardY + 345);
+  if (resolvedBest !== null) {
+    ctx.font = `bold 15px ${FONT}`;
+    ctx.fillStyle = PALETTE.gold;
+    ctx.fillText(`BEST  ${resolvedBest.toLocaleString('en-US')}`, cx, cardY + 396);
+  }
 
   // Pulsing Press to Start Button
   const pulse = 0.85 + 0.15 * Math.sin(time * 5);
   const btnW = 390;
   const btnH = 54;
   const btnX = cx - btnW / 2;
-  const btnY = cardY + 382;
+  const btnY = cardY + 424;
 
   ctx.save();
   ctx.globalAlpha = pulse;
@@ -1881,6 +2249,49 @@ function drawGameOverOverlay(ctx, state, bestScore) {
   const cx = WIDTH / 2;
   const cy = HEIGHT / 2;
 
+  const stats = (state && state.stats) || {};
+  const orbsCollected = Math.max(
+    0,
+    Math.floor(
+      Number.isFinite(stats.orbs)
+        ? stats.orbs
+        : Number.isFinite(state.totalOrbs)
+          ? state.totalOrbs
+          : 0,
+    ),
+  );
+  const deliveries = Math.max(
+    0,
+    Math.floor(
+      Number.isFinite(stats.deliveries)
+        ? stats.deliveries
+        : Number.isFinite(state.deliveriesCompleted)
+          ? state.deliveriesCompleted
+          : Number.isFinite(state.deliveries)
+            ? state.deliveries
+            : 0,
+    ),
+  );
+  const bestCombo = Math.max(
+    0,
+    Math.floor(
+      Number.isFinite(stats.bestCombo)
+        ? stats.bestCombo
+        : Number.isFinite(state.combo)
+          ? state.combo
+          : 0,
+    ),
+  );
+  const timeSurvived = Math.max(
+    0,
+    Number.isFinite(stats.timeSurvived)
+      ? stats.timeSurvived
+      : Number.isFinite(state.time)
+        ? state.time
+        : 0,
+  );
+  const bossKills = Math.max(0, Math.floor(Number.isFinite(stats.bossKills) ? stats.bossKills : 0));
+
   ctx.save();
 
   // Dramatic crimson-tinted dark overlay
@@ -1891,9 +2302,9 @@ function drawGameOverOverlay(ctx, state, bestScore) {
   ctx.fillRect(0, 0, WIDTH, HEIGHT);
 
   const cardW = 620;
-  const cardH = 410;
+  const cardH = 540;
   const cardX = cx - cardW / 2;
-  const cardY = cy - cardH / 2;
+  const cardY = 114;
 
   ctx.shadowColor = 'rgba(255, 42, 109, 0.4)';
   ctx.shadowBlur = 28;
@@ -1909,47 +2320,100 @@ function drawGameOverOverlay(ctx, state, bestScore) {
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
 
-  ctx.font = `bold 14px ${FONT}`;
+  ctx.font = `bold 13px ${FONT}`;
   ctx.fillStyle = PALETTE.gold;
-  ctx.fillText(`HULL DEPLETED  ·  ZONE ${zoneNum} (${zoneCfg.name})  ·  LEVEL ${level}`, cx, cardY + 48);
+  ctx.fillText(`HULL DEPLETED  ·  ZONE ${zoneNum} (${zoneCfg.name})  ·  LEVEL ${level}`, cx, cardY + 34);
 
   ctx.save();
-  ctx.font = `900 56px ${FONT}`;
+  ctx.font = `900 50px ${FONT}`;
   ctx.shadowColor = PALETTE.danger;
   ctx.shadowBlur = 18;
   ctx.fillStyle = '#ff4d88';
-  ctx.fillText('GAME OVER', cx, cardY + 104);
+  ctx.fillText('GAME OVER', cx, cardY + 80);
   ctx.restore();
 
   // Final Score Display Box
-  roundedRect(ctx, cx - 220, cardY + 150, 440, 124, 14);
+  const scoreBoxW = 460;
+  const scoreBoxX = cx - scoreBoxW / 2;
+  roundedRect(ctx, scoreBoxX, cardY + 116, scoreBoxW, 108, 14);
   ctx.fillStyle = 'rgba(18, 24, 56, 0.88)';
   ctx.fill();
   ctx.lineWidth = 1.5;
   ctx.strokeStyle = 'rgba(0, 245, 255, 0.45)';
   ctx.stroke();
 
-  ctx.font = `bold 14px ${FONT}`;
+  ctx.font = `bold 12px ${FONT}`;
   ctx.fillStyle = PALETTE.muted;
-  ctx.fillText('FINAL STARDUST SCORE', cx, cardY + 178);
+  ctx.fillText('FINAL STARDUST SCORE', cx, cardY + 138);
 
-  ctx.font = `bold 48px ${MONO_FONT}`;
+  ctx.font = `bold 42px ${MONO_FONT}`;
   ctx.fillStyle = PALETTE.cyan;
-  ctx.fillText(score.toLocaleString('en-US'), cx, cardY + 218);
+  ctx.fillText(score.toLocaleString('en-US'), cx, cardY + 174);
 
   if (resolvedBest !== null) {
     const bestDisplay = Math.max(score, resolvedBest);
-    ctx.font = `bold 15px ${FONT}`;
+    ctx.font = `bold 14px ${FONT}`;
     ctx.fillStyle = PALETTE.gold;
-    ctx.fillText(`BEST  ${bestDisplay.toLocaleString('en-US')}`, cx, cardY + 256);
+    ctx.fillText(`BEST  ${bestDisplay.toLocaleString('en-US')}`, cx, cardY + 206);
   }
+
+  // Run Stats Panel (5 rows)
+  const statsY = cardY + 238;
+  const statsH = 204;
+  roundedRect(ctx, scoreBoxX, statsY, scoreBoxW, statsH, 14);
+  ctx.fillStyle = 'rgba(14, 20, 48, 0.88)';
+  ctx.fill();
+  ctx.lineWidth = 1.3;
+  ctx.strokeStyle = 'rgba(0, 245, 255, 0.3)';
+  ctx.stroke();
+
+  ctx.font = `bold 11px ${FONT}`;
+  ctx.fillStyle = PALETTE.muted;
+  ctx.textAlign = 'center';
+  ctx.fillText('RUN STATISTICS', cx, statsY + 19);
+
+  const statRows = [
+    { label: 'Orbs collected', value: orbsCollected.toLocaleString('en-US'), color: PALETTE.cyan },
+    { label: 'Deliveries', value: deliveries.toLocaleString('en-US'), color: PALETTE.gate },
+    { label: 'Best combo', value: `×${bestCombo}`, color: PALETTE.gold },
+    { label: 'Time survived', value: `${timeSurvived.toFixed(1)}s`, color: PALETTE.text },
+    { label: 'Bosses destroyed', value: bossKills.toLocaleString('en-US'), color: PALETTE.bossGlow || '#ff5e3a' },
+  ];
+
+  const rowStartY = statsY + 46;
+  const rowStep = 33;
+  const padX = 28;
+  for (let i = 0; i < statRows.length; i += 1) {
+    const row = statRows[i];
+    const ry = rowStartY + i * rowStep;
+
+    if (i > 0) {
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(scoreBoxX + padX, ry - rowStep / 2);
+      ctx.lineTo(scoreBoxX + scoreBoxW - padX, ry - rowStep / 2);
+      ctx.stroke();
+    }
+
+    ctx.font = `600 14px ${FONT}`;
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#c4d7f2';
+    ctx.fillText(row.label, scoreBoxX + padX, ry);
+
+    ctx.font = `bold 15px ${MONO_FONT}`;
+    ctx.textAlign = 'right';
+    ctx.fillStyle = row.color;
+    ctx.fillText(row.value, scoreBoxX + scoreBoxW - padX, ry);
+  }
+  ctx.textAlign = 'center';
 
   // Restart Prompt Button
   const pulse = 0.86 + 0.14 * Math.sin(time * 5);
   const btnW = 380;
   const btnH = 52;
   const btnX = cx - btnW / 2;
-  const btnY = cardY + 316;
+  const btnY = cardY + 464;
 
   ctx.save();
   ctx.globalAlpha = pulse;
@@ -2271,6 +2735,9 @@ export function createRenderer(canvas) {
     drawOrbs(ctx, orbsToDraw, state.player, state.magnetTimer || 0, nowTime);
     drawPowerups(ctx, state.powerups, nowTime);
     drawComets(ctx, cometsToDraw, nowTime);
+    if (state.boss) {
+      drawBoss(ctx, state.boss, nowTime);
+    }
     drawPlayer(ctx, state, trail, dashCooldownMax);
     drawParticles(ctx, state.particles, extraBursts);
     drawMilestoneBanners(ctx, milestoneBanners);
@@ -2284,6 +2751,11 @@ export function createRenderer(canvas) {
       ctx.fillStyle = slowGrad;
       ctx.fillRect(0, 0, WIDTH, HEIGHT);
       ctx.restore();
+    }
+
+    // Pulsing red-orange edge glow while a comet storm is active
+    if (state.stormActive) {
+      drawStormEdgeGlow(ctx, state, nowTime);
     }
 
     // Brief full-screen orange-white flash when bomb clears comets
@@ -2323,6 +2795,7 @@ export function createRenderer(canvas) {
     } else {
       drawHud(ctx, state, dashCooldownMax);
       drawZoneBanner(ctx, state);
+      drawStormWarningBanner(ctx, state, nowTime);
     }
 
     ctx.restore();

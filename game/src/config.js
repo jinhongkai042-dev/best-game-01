@@ -49,6 +49,9 @@ export const COMET = {
 
 export const ELITE = { r: 34, speedMultiplier: 0.55, dropOrbs: 2, spawnWeight: 0.12 };
 
+export const BOSS = { r: 42, hp: 3, speedMultiplier: 0.5, points: 500, dropOrbs: 5, spawnEvery: 60 };
+export const STORM = { every: 45, duration: 5, warningDuration: 1, spawnPerSecond: 3 };
+
 export const POWERUP = {
   r: 13,
   speed: 70,
@@ -140,6 +143,10 @@ export const PALETTE = {
   cometMiniRim: '#ff6b6b',
   elite: '#b5179e',
   eliteGlow: '#f72585',
+  boss: '#ff1744',
+  bossGlow: '#ff5e3a',
+  storm: '#ff9e00',
+  stormGlow: '#ff2a6d',
   heartFull: '#ff2a85',
   heartGlow: '#ff75b5',
   heartEmpty: 'rgba(255, 255, 255, 0.16)',
@@ -272,6 +279,8 @@ export const CONFIG = {
   cometRadius: COMET.r,
   comets: COMET,
   elite: ELITE,
+  boss: BOSS,
+  storm: STORM,
   doubleDuration: POWERUP.doubleDuration,
   magnetDuration: POWERUP.magnetDuration,
   slowDuration: POWERUP.slowDuration,

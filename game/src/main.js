@@ -7,7 +7,7 @@ import { createInput } from './input.js';
 import { createRenderer } from './render.js';
 import { stageShot } from './shots.js';
 import { createAudio } from './audio.js';
-import { loadBest, saveBest } from './progression.js';
+import { loadBest, saveBest, loadStats, saveStats } from './progression.js';
 
 const MAX_FRAME = 0.1;
 
@@ -16,7 +16,7 @@ const shot = params.get('shot');
 const seedParam = Number.parseInt(params.get('seed') ?? '', 10);
 const initialSeed = Number.isInteger(seedParam)
   ? seedParam
-  : Math.floor(Math.random() * 4294967296);
+  : globalThis.crypto.getRandomValues(new Uint32Array(1))[0];
 
 const canvas = document.getElementById('game');
 const statusEl = document.getElementById('status');
@@ -44,6 +44,7 @@ function runGame() {
   const input = createInput(canvas);
   let runSeed = initialSeed;
   let state = createWorld({ ...CONFIG, seed: runSeed });
+  state.stats = loadStats();
   state.best = loadBest();
   let lastTime = performance.now();
 
@@ -56,6 +57,7 @@ function runGame() {
   function restartFromOver() {
     runSeed = (runSeed + 0x9e3779b9) >>> 0;
     state = createWorld({ ...CONFIG, seed: runSeed });
+    state.stats = loadStats();
     state.best = loadBest();
     state.status = 'playing';
     audio.start();
@@ -91,6 +93,10 @@ function runGame() {
     const prevZone = state.zone || 1;
     const prevZoneChanged = state.zoneChanged || 0;
 
+    const prevBoss = state.boss || null;
+    const prevBossHp = state.boss ? state.boss.hp : 0;
+    const prevStormWarning = state.stormWarning || false;
+
     updateWorld(state, snap, dt);
 
     if (prevStatus === 'title' && state.status === 'playing') {
@@ -99,6 +105,16 @@ function runGame() {
     }
 
     if (state.status === 'playing') {
+      if (prevBoss === null && state.boss) {
+        audio.bossSpawn?.();
+      } else if (state.boss && prevBossHp > state.boss.hp) {
+        audio.bossHit?.();
+      }
+      if (prevBoss !== null && state.boss === null && state.score >= prevScore + 500) {
+        audio.bossDown?.();
+      }
+      if (!prevStormWarning && state.stormWarning) audio.stormWarn?.();
+
       const gateNowActive = Boolean(state.gate && state.gate.active);
       const delivered =
         (prevGateActive && !gateNowActive && state.score > prevScore) ||
@@ -148,6 +164,13 @@ function runGame() {
 
     if (prevStatus !== 'over' && state.status === 'over') {
       state.best = saveBest(state.score);
+      state.stats = saveStats(state.stats || {
+        orbs: state.totalOrbs,
+        deliveries: state.deliveriesCompleted,
+        bestCombo: state.combo,
+        timeSurvived: state.time,
+        bossKills: 0,
+      });
       audio.gameOver();
       announce(`Game over. Final score ${state.score}. Best score ${state.best}.`);
     }

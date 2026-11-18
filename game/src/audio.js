@@ -573,6 +573,189 @@ export function playBomb() {
   }
 }
 
+/** Deep sub-bass boom when a boss comet enters the arena. */
+export function playBossSpawn() {
+  const audioCtx = getContext();
+  if (!audioCtx || !canTrigger('bossSpawn', audioCtx, 0.15)) return;
+  try {
+    const now = audioCtx.currentTime;
+
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(96, now);
+    osc.frequency.exponentialRampToValueAtTime(28, now + 0.55);
+
+    gain.gain.setValueAtTime(0.001, now);
+    gain.gain.linearRampToValueAtTime(0.32, now + 0.03);
+    gain.gain.exponentialRampToValueAtTime(0.0008, now + 0.58);
+
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start(now);
+    osc.stop(now + 0.6);
+
+    const sub = audioCtx.createOscillator();
+    const sGain = audioCtx.createGain();
+    sub.type = 'triangle';
+    sub.frequency.setValueAtTime(144, now);
+    sub.frequency.exponentialRampToValueAtTime(42, now + 0.45);
+    sGain.gain.setValueAtTime(0.001, now);
+    sGain.gain.linearRampToValueAtTime(0.14, now + 0.025);
+    sGain.gain.exponentialRampToValueAtTime(0.0008, now + 0.48);
+    sub.connect(sGain);
+    sGain.connect(audioCtx.destination);
+    sub.start(now);
+    sub.stop(now + 0.5);
+
+    const noise = audioCtx.createBufferSource();
+    noise.buffer = getNoiseBuffer(audioCtx);
+    const filter = audioCtx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(420, now);
+    filter.frequency.exponentialRampToValueAtTime(80, now + 0.35);
+
+    const nGain = audioCtx.createGain();
+    nGain.gain.setValueAtTime(0.001, now);
+    nGain.gain.linearRampToValueAtTime(0.15, now + 0.02);
+    nGain.gain.exponentialRampToValueAtTime(0.0008, now + 0.36);
+
+    noise.connect(filter);
+    filter.connect(nGain);
+    nGain.connect(audioCtx.destination);
+    noise.start(now);
+    noise.stop(now + 0.38);
+  } catch {
+    // Ignore audio errors.
+  }
+}
+
+/** Short percussive thunk when the boss takes damage. */
+export function playBossHit() {
+  const audioCtx = getContext();
+  if (!audioCtx || !canTrigger('bossHit', audioCtx, 0.06)) return;
+  try {
+    const now = audioCtx.currentTime;
+
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(210, now);
+    osc.frequency.exponentialRampToValueAtTime(62, now + 0.12);
+
+    gain.gain.setValueAtTime(0.001, now);
+    gain.gain.linearRampToValueAtTime(0.24, now + 0.008);
+    gain.gain.exponentialRampToValueAtTime(0.0008, now + 0.13);
+
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start(now);
+    osc.stop(now + 0.14);
+
+    const punch = audioCtx.createOscillator();
+    const filter = audioCtx.createBiquadFilter();
+    const pGain = audioCtx.createGain();
+    punch.type = 'square';
+    punch.frequency.setValueAtTime(150, now);
+    punch.frequency.exponentialRampToValueAtTime(55, now + 0.09);
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(620, now);
+    pGain.gain.setValueAtTime(0.001, now);
+    pGain.gain.linearRampToValueAtTime(0.12, now + 0.006);
+    pGain.gain.exponentialRampToValueAtTime(0.0008, now + 0.1);
+
+    punch.connect(filter);
+    filter.connect(pGain);
+    pGain.connect(audioCtx.destination);
+    punch.start(now);
+    punch.stop(now + 0.11);
+  } catch {
+    // Ignore audio errors.
+  }
+}
+
+/** Rising arpeggio fanfare when the boss is defeated. */
+export function playBossDown() {
+  const audioCtx = getContext();
+  if (!audioCtx || !canTrigger('bossDown', audioCtx, 0.15)) return;
+  try {
+    const now = audioCtx.currentTime;
+    const notes = [392.0, 493.88, 587.33, 783.99, 987.77, 1174.66];
+    notes.forEach((freq, idx) => {
+      const start = now + idx * 0.055;
+      const isLast = idx === notes.length - 1;
+      const dur = isLast ? 0.42 : 0.2;
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = idx % 2 === 0 ? 'triangle' : 'sine';
+      osc.frequency.setValueAtTime(freq, start);
+      osc.frequency.exponentialRampToValueAtTime(freq * 1.02, start + dur);
+
+      gain.gain.setValueAtTime(0.001, start);
+      gain.gain.linearRampToValueAtTime(isLast ? 0.2 : 0.16, start + 0.012);
+      gain.gain.exponentialRampToValueAtTime(0.0008, start + dur);
+
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start(start);
+      osc.stop(start + dur + 0.02);
+    });
+
+    const bass = audioCtx.createOscillator();
+    const bGain = audioCtx.createGain();
+    bass.type = 'sine';
+    bass.frequency.setValueAtTime(196.0, now);
+    bass.frequency.exponentialRampToValueAtTime(392.0, now + 0.42);
+    bGain.gain.setValueAtTime(0.001, now);
+    bGain.gain.linearRampToValueAtTime(0.18, now + 0.02);
+    bGain.gain.exponentialRampToValueAtTime(0.0008, now + 0.48);
+    bass.connect(bGain);
+    bGain.connect(audioCtx.destination);
+    bass.start(now);
+    bass.stop(now + 0.5);
+  } catch {
+    // Ignore audio errors.
+  }
+}
+
+/** Rising two-note siren warning before a comet storm begins. */
+export function playStormWarn() {
+  const audioCtx = getContext();
+  if (!audioCtx || !canTrigger('stormWarn', audioCtx, 0.15)) return;
+  try {
+    const now = audioCtx.currentTime;
+    const pulses = [
+      { offset: 0, from: 440, to: 660, dur: 0.18 },
+      { offset: 0.23, from: 587.33, to: 880, dur: 0.22 },
+    ];
+    pulses.forEach((p) => {
+      const start = now + p.offset;
+      const osc = audioCtx.createOscillator();
+      const filter = audioCtx.createBiquadFilter();
+      const gain = audioCtx.createGain();
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(p.from, start);
+      osc.frequency.exponentialRampToValueAtTime(p.to, start + p.dur);
+
+      filter.type = 'lowpass';
+      filter.frequency.setValueAtTime(1400, start);
+      filter.frequency.exponentialRampToValueAtTime(2200, start + p.dur);
+
+      gain.gain.setValueAtTime(0.001, start);
+      gain.gain.linearRampToValueAtTime(0.14, start + 0.018);
+      gain.gain.exponentialRampToValueAtTime(0.0008, start + p.dur + 0.03);
+
+      osc.connect(filter);
+      filter.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start(start);
+      osc.stop(start + p.dur + 0.04);
+    });
+  } catch {
+    // Ignore audio errors.
+  }
+}
+
 export function createAudio() {
   return {
     unlock: unlockAudio,
@@ -591,6 +774,10 @@ export function createAudio() {
     comboMilestone: playComboMilestone,
     milestone: playComboMilestone,
     bomb: playBomb,
+    bossSpawn: playBossSpawn,
+    bossHit: playBossHit,
+    bossDown: playBossDown,
+    stormWarn: playStormWarn,
   };
 }
 

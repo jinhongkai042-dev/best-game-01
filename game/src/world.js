@@ -1,6 +1,7 @@
 // Stardust Courier logic. Coordinates are logical canvas pixels; dt is in seconds.
 // Keyboard steering overrides a valid mouse target. Private data stays in a WeakMap.
 import { createRandom } from './random.js';
+import { createStorm, updateStorm } from './storm.js';
 import * as defaults from './config.js';
 
 const worlds = new WeakMap();
@@ -14,6 +15,7 @@ const MAX_PARTICLES = 256;
 const { ORB, COMET, POWERUP, DELIVERY } = defaults;
 const DASH = defaults.DASH;
 const ELITE = defaults.ELITE;
+const BOSS = defaults.BOSS;
 const COMBO_MILESTONES = defaults.COMBO_MILESTONES;
 
 const clamp = (value, low, high) => Math.max(low, Math.min(high, value));
@@ -54,6 +56,12 @@ export function createWorld(config = {}) {
     deliverTarget: DELIVERY.target,
     deliveriesCompleted: 0,
     totalOrbs: 0,
+    boss: null,
+    bossSpawnedAt: 0,
+    storm: createStorm(),
+    stormActive: false,
+    stormWarning: false,
+    stats: { orbs: 0, deliveries: 0, bestCombo: 1, timeSurvived: 0, bossKills: 0 },
     deliveries: 0,
     gate: null,
     magnetTimer: 0,
@@ -111,25 +119,36 @@ function cometLoad(kind) {
   return kind === 'splitter' || kind === 'elite' ? 2 : 1;
 }
 
+function hasCometRoom(state, cost) {
+  const load = state.comets.reduce((sum, comet) => sum + cometLoad(comet.kind), state.boss ? 2 : 0);
+  return load + cost <= MAX_COMETS;
+}
+
 function spawnComet(state, data) {
   const zone = currentZone(state, data);
   const random = data.random;
   let kind = chooseKind(random, zone.cometWeights);
   if ((state.zone === 2 || state.zone === 3) && random() < ELITE.spawnWeight) kind = 'elite';
-  // Reserve two slots for each splitter and elite.
-  const load = state.comets.reduce((sum, comet) => sum + cometLoad(comet.kind), 0);
-  if (load + cometLoad(kind) > MAX_COMETS) return;
+  spawnCometAt(state, data, undefined, undefined, kind);
+}
+
+function spawnCometAt(state, data, x, y, kind) {
+  if (!hasCometRoom(state, cometLoad(kind))) return;
+  const zone = currentZone(state, data);
+  const random = data.random;
   const r = kind === 'elite' ? ELITE.r : Math.min(
     COMET.minRadius + random() * (COMET.maxRadius - COMET.minRadius),
     data.width / 4, data.height / 4,
   );
-  const edge = Math.floor(random() * 4);
-  let x = random() * data.width;
-  let y = random() * data.height;
-  if (edge === 0) y = -r - 6;
-  else if (edge === 1) x = data.width + r + 6;
-  else if (edge === 2) y = data.height + r + 6;
-  else x = -r - 6;
+  if (x === undefined) {
+    const edge = Math.floor(random() * 4);
+    x = random() * data.width;
+    y = random() * data.height;
+    if (edge === 0) y = -r - 6;
+    else if (edge === 1) x = data.width + r + 6;
+    else if (edge === 2) y = data.height + r + 6;
+    else x = -r - 6;
+  }
   const dx = data.width * (0.15 + random() * 0.7) - x;
   const dy = data.height * (0.15 + random() * 0.7) - y;
   const distance = Math.hypot(dx, dy) || 1;
@@ -146,7 +165,7 @@ function spawnComet(state, data) {
   data.cometMeta.set(comet, { age: 0, entered: false });
 }
 
-function dropEliteOrbs(state, data, comet) {
+function dropBonusOrbs(state, data, comet, count) {
   const r = Math.min(ORB.bonusRadius, data.width / 2, data.height / 2);
   const x = clamp(comet.x, r, data.width - r);
   const y = clamp(comet.y, r, data.height - r);
@@ -154,7 +173,7 @@ function dropEliteOrbs(state, data, comet) {
   const maxX = Math.min(data.width - r, x + comet.r);
   const minY = Math.max(r, y - comet.r);
   const maxY = Math.min(data.height - r, y + comet.r);
-  for (let i = 0; i < ELITE.dropOrbs && state.orbs.length < MAX_ORBS; i += 1) {
+  for (let i = 0; i < count && state.orbs.length < MAX_ORBS; i += 1) {
     state.orbs.push({
       x: minX + data.random() * (maxX - minX),
       y: minY + data.random() * (maxY - minY),
@@ -327,6 +346,54 @@ function splitComet(state, data, comet, fragments, exited) {
   burst(state, data, x, y, currentZone(state, data).palette.cometGlow, 14);
 }
 
+function hitPlayer(state, data) {
+  if (data.invulnerable > 0) return;
+  const protectedHit = state.shield;
+  if (protectedHit) state.shield = false;
+  else state.lives = Math.max(0, state.lives - 1);
+  data.invulnerable = INVULNERABLE_SECONDS;
+  burst(state, data, state.player.x, state.player.y, protectedHit ? '#78b7ff' : '#ff518c', 28);
+  if (state.lives === 0) state.status = 'over';
+}
+
+function updateBoss(state, data, oldPlayerX, oldPlayerY, dt) {
+  const boss = state.boss;
+  if (!boss) {
+    if (state.totalOrbs < state.bossSpawnedAt + BOSS.spawnEvery || !hasCometRoom(state, 2)) return;
+    const x = data.random() * data.width;
+    const drift = Math.min(30, data.speed * 0.28);
+    const speed = (COMET.speed + COMET.speedPerLevel * (state.level - 1)) * BOSS.speedMultiplier;
+    state.boss = {
+      x, y: -BOSS.r - 6, r: BOSS.r, hp: BOSS.hp, hitTimer: 0,
+      vx: clamp((state.player.x - x) * 0.1, -drift, drift), vy: Math.min(speed, data.speed * 0.72),
+    };
+    state.bossSpawnedAt = state.totalOrbs;
+    return;
+  }
+  const oldX = boss.x;
+  const oldY = boss.y;
+  boss.hitTimer = countdown(boss.hitTimer, dt);
+  boss.x += boss.vx * dt;
+  boss.y += boss.vy * dt;
+  if (boss.y - boss.r > data.height) {
+    state.boss = null;
+  } else if (touches(state.player, oldPlayerX, oldPlayerY, boss, oldX, oldY)) {
+    if (!state.isDashing) hitPlayer(state, data);
+    else if (boss.hitTimer === 0) {
+      boss.hp -= 1;
+      boss.hitTimer = 0.5;
+      burst(state, data, boss.x, boss.y, defaults.PALETTE.gold, 28);
+      boss.y -= 20;
+      if (boss.hp <= 0) {
+        state.score += BOSS.points;
+        dropBonusOrbs(state, data, boss, BOSS.dropOrbs);
+        state.stats.bossKills += 1;
+        state.boss = null;
+      }
+    }
+  }
+}
+
 function updatePlaying(state, data, input, dt) {
   state.time += dt;
   const comboWasActive = state.comboTimer > 0;
@@ -486,27 +553,28 @@ function updatePlaying(state, data, input, dt) {
     const exited = meta.entered && !visible;
     if (touches(player, oldPlayerX, oldPlayerY, comet, oldX, oldY)) {
       state.comets.splice(i--, 1);
-      if (data.invulnerable > 0) continue;
-      const protectedHit = state.shield;
-      if (protectedHit) state.shield = false;
-      else state.lives = Math.max(0, state.lives - 1);
-      data.invulnerable = INVULNERABLE_SECONDS;
-      burst(state, data, player.x, player.y, protectedHit ? '#78b7ff' : '#ff518c', 28);
-      if (state.lives === 0) {
-        state.status = 'over';
-        break;
-      }
+      hitPlayer(state, data);
+      if (state.status === 'over') break;
     } else if (comet.kind === 'splitter' && (exited || meta.age + EPSILON >= COMET.splitterLifetime)) {
       state.comets.splice(i--, 1);
       splitComet(state, data, comet, fragments, exited || !visible);
     } else if (exited || comet.x < -comet.r - 12 || comet.x > data.width + comet.r + 12
       || comet.y < -comet.r - 12 || comet.y > data.height + comet.r + 12) {
       state.comets.splice(i--, 1);
-      if (comet.kind === 'elite') dropEliteOrbs(state, data, comet);
+      if (comet.kind === 'elite') dropBonusOrbs(state, data, comet, ELITE.dropOrbs);
     }
   }
   // New fragments start moving next step, so each entity gets exactly one update per step.
   state.comets.push(...fragments);
+  if (state.status === 'playing') updateBoss(state, data, oldPlayerX, oldPlayerY, dt);
+  const stormOut = updateStorm(state.storm, state.totalOrbs, STEP, data.random);
+  state.stormActive = stormOut.active;
+  state.stormWarning = stormOut.warning;
+  for (const { x, y, kind } of stormOut.spawn) spawnCometAt(state, data, x, y, kind);
+  state.stats.orbs = state.totalOrbs;
+  state.stats.deliveries = state.deliveriesCompleted;
+  state.stats.bestCombo = Math.max(state.stats.bestCombo, state.combo);
+  state.stats.timeSurvived = state.time;
 }
 
 /** Mutate and return a state from createWorld. Use createWorld again for a complete restart. */
