@@ -136,6 +136,9 @@ export function stageShot(name, state, updateFn) {
       zoneChanged: 0,
       deliverCount: CONFIG.delivery.target,
       deliverTarget: CONFIG.delivery.target,
+      deliveriesCompleted: 2,
+      deliveries: 2,
+      totalOrbs: 28,
       gate: { x: gateX, y: gateY, r: CONFIG.delivery.radius, active: true },
       combo: 4,
       comboTimer: 2.15,
@@ -147,6 +150,10 @@ export function stageShot(name, state, updateFn) {
       doubleTimer: 7.4,
       magnetTimer: 5.8,
       slowTimer: 0,
+      boss: null,
+      stormActive: false,
+      stormWarning: false,
+      stats: { orbs: 28, deliveries: 2, bestCombo: 4, timeSurvived: 34.6, bossKills: 0 },
       player: { x: 575, y: 475, r: CONFIG.player.r },
       orbs: [
         { x: 645, y: 385, r: CONFIG.orbs.bonusRadius, kind: 'bonus' },
@@ -180,6 +187,9 @@ export function stageShot(name, state, updateFn) {
     const level = 5;
     const gateX = 430;
     const gateY = CONFIG.height - CONFIG.delivery.radius;
+    const bossCfg = (CONFIG && (CONFIG.boss || CONFIG.BOSS)) || { r: 42, hp: 3 };
+    const bossR = Number.isFinite(bossCfg.r) ? bossCfg.r : 42;
+    const bossMaxHp = Number.isFinite(bossCfg.hp) ? Math.max(1, Math.floor(bossCfg.hp)) : 3;
     Object.assign(state, {
       status: 'playing',
       score: 3420,
@@ -187,9 +197,12 @@ export function stageShot(name, state, updateFn) {
       lives: 2,
       level,
       zone: Math.min(3, level),
-      zoneChanged: 1.85,
+      zoneChanged: 0,
       deliverCount: CONFIG.delivery.target,
       deliverTarget: CONFIG.delivery.target,
+      deliveriesCompleted: 5,
+      deliveries: 5,
+      totalOrbs: 52,
       gate: { x: gateX, y: gateY, r: CONFIG.delivery.radius, active: true },
       combo: 5,
       comboTimer: 2.35,
@@ -202,6 +215,10 @@ export function stageShot(name, state, updateFn) {
       doubleTimer: 5.8,
       magnetTimer: 4.2,
       slowTimer: 3.6,
+      boss: { x: 965, y: 295, r: bossR, hp: Math.max(1, bossMaxHp - 1), vx: -100, vy: 140 },
+      stormActive: false,
+      stormWarning: true,
+      stats: { orbs: 52, deliveries: 5, bestCombo: 6, timeSurvived: 68.4, bossKills: 1 },
       player: { x: 690, y: 445, r: CONFIG.player.r },
       orbs: [
         { x: 770, y: 335, r: CONFIG.orbs.bonusRadius, kind: 'bonus' },
@@ -209,14 +226,14 @@ export function stageShot(name, state, updateFn) {
         { x: 585, y: 325, r: CONFIG.orbs.starRadius, kind: 'star' },
         { x: 460, y: 455, r: CONFIG.orbs.bonusRadius, kind: 'bonus' },
         { x: 240, y: 245, r: CONFIG.orbs.starRadius, kind: 'star' },
-        { x: 1090, y: 240, r: CONFIG.orbs.starRadius, kind: 'star' },
+        { x: 1125, y: 235, r: CONFIG.orbs.starRadius, kind: 'star' },
         { x: 540, y: 585, r: CONFIG.orbs.starRadius, kind: 'star' },
         { x: 1080, y: 515, r: CONFIG.orbs.bonusRadius, kind: 'bonus' },
       ],
       comets: [
-        { x: 965, y: 305, r: 34, vx: -135, vy: 195, kind: 'elite' },
-        { x: 265, y: 315, r: 22, vx: 135, vy: 215, kind: 'homing' },
-        { x: 410, y: 255, r: 25, vx: 125, vy: 245, kind: 'splitter' },
+        { x: 185, y: 220, r: 34, vx: 120, vy: 190, kind: 'elite' },
+        { x: 265, y: 340, r: 22, vx: 135, vy: 215, kind: 'homing' },
+        { x: 400, y: 265, r: 25, vx: 125, vy: 245, kind: 'splitter' },
         { x: 290, y: 495, r: 12, vx: 185, vy: 250, kind: 'mini' },
         { x: 345, y: 535, r: 12, vx: 155, vy: 265, kind: 'mini' },
       ],
@@ -244,6 +261,9 @@ export function stageShot(name, state, updateFn) {
       zoneChanged: 0,
       deliverCount: 6,
       deliverTarget: CONFIG.delivery.target,
+      deliveriesCompleted: 6,
+      deliveries: 6,
+      totalOrbs: 64,
       gate: { x: 640, y: CONFIG.height - CONFIG.delivery.radius, r: CONFIG.delivery.radius, active: false },
       combo: 1,
       comboTimer: 0,
@@ -255,6 +275,10 @@ export function stageShot(name, state, updateFn) {
       doubleTimer: 0,
       magnetTimer: 0,
       slowTimer: 0,
+      boss: null,
+      stormActive: false,
+      stormWarning: false,
+      stats: { orbs: 64, deliveries: 6, bestCombo: 8, timeSurvived: 84.2, bossKills: 2 },
       player: { x: 640, y: 510, r: CONFIG.player.r },
       orbs: [
         { x: 220, y: 260, r: CONFIG.orbs.starRadius, kind: 'star' },
@@ -299,6 +323,9 @@ export function stageShot(name, state, updateFn) {
     doubleTimer: 0,
     magnetTimer: 0,
     slowTimer: 0,
+    boss: null,
+    stormActive: false,
+    stormWarning: false,
     player: { x: 640, y: 635, r: CONFIG.player.r },
     orbs: [
       { x: 145, y: 185, r: CONFIG.orbs.bonusRadius, kind: 'bonus' },
